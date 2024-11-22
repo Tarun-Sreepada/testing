@@ -1,0 +1,1 @@
+/usr/bin/c++ -g3 -O3 -g CMakeFiles/benchmark.dir/benchmark.cpp.o -o benchmark  /usr/lib/x86_64-linux-gnu/liburing.so 
