@@ -294,7 +294,7 @@ int parse_arguments(int argc, char *argv[],
                     unsigned &duration_sec,
                     size_t &block_size,
                     bool &is_read,
-                    bool &is_random, uint16_t &num_threads) {
+                    bool &is_random) {
     int option_index = 0;
     int c;
     static struct option long_options[] = {
@@ -304,7 +304,6 @@ int parse_arguments(int argc, char *argv[],
         {"page_size", required_argument, 0, 0},
         {"operation", required_argument, 0, 0},
         {"method", required_argument, 0, 0},
-        {"threads", required_argument, 0, 0},
         {0, 0, 0, 0}
     };
 
@@ -344,9 +343,6 @@ int parse_arguments(int argc, char *argv[],
                     return 1;
                 }
             }
-            else if (opt_name == "threads") {
-                num_threads = std::stoul(opt_value);
-            }
         } else {
             std::cerr << "Invalid option." << std::endl;
             return 1;
@@ -373,29 +369,26 @@ int parse_arguments(int argc, char *argv[],
  * @param is_random True for random access, false for sequential.
  * @return 0 on success, 1 on failure.
  */
-void run_benchmark_thread(const std::string &device,
-                          unsigned queue_depth,
-                          unsigned duration_sec,
-                          size_t block_size,
-                          bool is_read,
-                          bool is_random,
-                          std::atomic<unsigned int> &completed_ios,
-                          std::atomic<unsigned long long> &total_bytes,
-                          unsigned thread_id) {
+int run_benchmark(const std::string &device,
+                  unsigned queue_depth,
+                  unsigned duration_sec,
+                  size_t block_size,
+                  bool is_read,
+                  bool is_random) {
     int fd = open(device.c_str(), O_RDWR | O_DIRECT | O_SYNC);
     if (fd < 0) {
         perror("open");
-        return;
+        return 1;
     }
 
     struct submitter *s = new submitter();
     memset(s, 0, sizeof(*s));
 
     if (app_setup_uring(s, queue_depth)) {
-        std::cerr << "Thread " << thread_id << ": Unable to setup io_uring!" << std::endl;
+        std::cerr << "Unable to setup io_uring!" << std::endl;
         close(fd);
         delete s;
-        return;
+        return 1;
     }
 
     off_t device_size = lseek(fd, 0, SEEK_END);
@@ -403,34 +396,48 @@ void run_benchmark_thread(const std::string &device,
         perror("lseek");
         close(fd);
         delete s;
-        return;
+        return 1;
     }
     lseek(fd, 0, SEEK_SET);
 
+    // Ensure device_size is a multiple of block_size
     device_size = (device_size / block_size) * block_size;
 
+    // Random number generator setup
     std::mt19937_64 rng(std::random_device{}());
     std::uniform_int_distribution<off_t> dist(0, device_size - block_size);
 
+    // Start timing
     auto start_time = std::chrono::high_resolution_clock::now();
+
+    // Variables for submission tracking
     unsigned submitted_ios = 0;
     unsigned to_submit = 0;
     off_t offset = 0;
 
+    std::ostringstream stats_buffer;
+    std::atomic<unsigned int> completed_ios = 0;
+    std::atomic<unsigned long long> total_bytes = 0;
+
     while (true) {
+        // Check if duration has passed
         auto now = std::chrono::high_resolution_clock::now();
         auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
         if (elapsed_sec >= duration_sec) {
             break;
         }
 
+        // Submit as many I/Os as possible up to queue_depth
         while ((submitted_ios - completed_ios) < queue_depth) {
             struct io_data *io = new io_data();
 
+            // Generate offset
             if (is_random) {
                 offset = dist(rng);
+                // Align offset to block_size
                 offset = (offset / block_size) * block_size;
             } else {
+                // Sequential
                 offset += block_size;
                 if (offset >= device_size) {
                     offset = 0;
@@ -442,23 +449,47 @@ void run_benchmark_thread(const std::string &device,
             to_submit++;
         }
 
+        // Submit to the kernel
         int ret = io_uring_enter(s->ring_fd, to_submit, 0, 0);
         if (ret < 0) {
             perror("io_uring_enter");
             close(fd);
             delete s;
-            return;
+            return 1;
         }
-        to_submit = 0;
+        to_submit = 0; // Reset after submission
 
+        // Process completions
         reap_cqes(s, completed_ios, total_bytes);
-    }
 
+        // Update stats
+        stats_buffer.str("");
+        stats_buffer << "\rI/Os: " << completed_ios << ", Bytes: " << total_bytes << ", Time: " << elapsed_sec << " sec";
+        std::cout << stats_buffer.str() << std::flush;
+    }
+    std::cout << "\n";
+
+    // Final processing of any remaining completions
     while (completed_ios < submitted_ios) {
         reap_cqes(s, completed_ios, total_bytes);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
+    // Calculate performance metrics
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto total_time_sec = std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time).count();
+
+    double bandwidth = (double)total_bytes / (1024.0 * 1024.0) / total_time_sec; // MB/s
+    double iops = (double)completed_ios / total_time_sec;
+
+    std::cout << "Test completed." << std::endl;
+    std::cout << "Total I/Os: " << completed_ios << std::endl;
+    std::cout << "Total bytes: " << total_bytes << " bytes" << " (" << byte_conversion(total_bytes, "binary") << ")" << std::endl;
+    std::cout << "Total time: " << total_time_sec << " seconds" << std::endl;
+    std::cout << "Bandwidth: " << bandwidth << " MB/s" << std::endl;
+    std::cout << "IOPS: " << iops << " ops/sec" << std::endl;
+
+    // Clean up
     close(fd);
     munmap(s->sq_ptr, s->sring_sz);
     if (s->cq_ptr && s->cq_ptr != s->sq_ptr) {
@@ -467,6 +498,8 @@ void run_benchmark_thread(const std::string &device,
     munmap(s->sqes, s->sqes_sz);
     close(s->ring_fd);
     delete s;
+
+    return 0;
 }
 
 
@@ -477,38 +510,14 @@ int main(int argc, char *argv[]) {
     size_t block_size = BLOCK_SZ_DEFAULT;
     bool is_read = true;
     bool is_random = false;
-    uint16_t num_threads = 0;
 
-    if (parse_arguments(argc, argv, device, queue_depth, duration_sec, block_size, is_read, is_random, num_threads)) {
+    if (parse_arguments(argc, argv, device, queue_depth, duration_sec, block_size, is_read, is_random)) {
         return 1;
     }
 
-    std::cout << "Device: " << device << ", Queue depth: " << queue_depth << ", Duration: " << duration_sec << " sec" 
-    << ", Block size: " << byte_conversion(block_size, "binary") 
-    << ", Operation: " << (is_read ? "read" : "write") 
-    << ", Method: " << ((is_random ? "random") : "sequential"
-    << ", Threads: " << num_threads << std::endl;
-
-    std::atomic<unsigned int> completed_ios(0);
-    std::atomic<unsigned long long> total_bytes(0);
-
-    std::vector<std::thread> threads;
-    for (unsigned i = 0; i < num_threads; ++i) {
-        threads.emplace_back(run_benchmark_thread, device, queue_depth, duration_sec, block_size,
-                             is_read, is_random, std::ref(completed_ios), std::ref(total_bytes), i);
+    if (run_benchmark(device, queue_depth, duration_sec, block_size, is_read, is_random)) {
+        return 1;
     }
-
-    for (auto &t : threads) {
-        t.join();
-    }
-
-    double bandwidth = (double)total_bytes / (1024.0 * 1024.0) / duration_sec;
-    double iops = (double)completed_ios / duration_sec;
-
-    std::cout << "Total I/Os: " << completed_ios.load() << std::endl;
-    std::cout << "Total bytes: " << total_bytes.load() << " bytes" << std::endl;
-    std::cout << "Bandwidth: " << bandwidth << " MB/s" << std::endl;
-    std::cout << "IOPS: " << iops << " ops/sec" << std::endl;
 
     return 0;
 }
