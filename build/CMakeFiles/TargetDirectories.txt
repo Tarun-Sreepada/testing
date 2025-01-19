@@ -1,5 +1,0 @@
-/home/tarun/testing/build/CMakeFiles/io_uring_enter.dir
-/home/tarun/testing/build/CMakeFiles/benchmark.dir
-/home/tarun/testing/build/CMakeFiles/show_flags_target.dir
-/home/tarun/testing/build/CMakeFiles/edit_cache.dir
-/home/tarun/testing/build/CMakeFiles/rebuild_cache.dir
