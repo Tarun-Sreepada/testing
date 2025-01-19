@@ -351,12 +351,17 @@ __global__ void mine(uint32_t *base_pattern,
                      uint32_t *pattern, uint32_t minUtil, uint32_t *that_didnt_work)
 
 {
-    for (uint32_t i = 0; i < maxItem + 1; i++)
-    {
-        if (primary[i] == 0)
-        {
-            continue;
-        }
+    // for (uint32_t i = 0; i < maxItem + 1; i++)
+    // {
+        uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (tid > maxItem + 1) return;
+        uint32_t i = tid;
+            if (primary[i] == 0)
+            {
+                return;
+            }
+        printf("i: %d\n", i);
+
 
         uint32_t *n_pattern = (uint32_t *)malloc(sizeof(uint32_t) * (base_pattern[0] + 1));
         n_pattern[0] = base_pattern[0] + 1;
@@ -374,6 +379,13 @@ __global__ void mine(uint32_t *base_pattern,
 
         uint32_t *n_subtree = (uint32_t *)malloc(sizeof(uint32_t) * (maxItem + 1));
         uint32_t *n_local = (uint32_t *)malloc(sizeof(uint32_t) * (maxItem + 1));
+
+        // check if memory is allocated
+        if (projection_items == NULL || n_start == NULL || n_end == NULL || n_utility == NULL || n_subtree == NULL || n_local == NULL)
+        {
+            printf("Memory allocation failed\n");
+            return;
+        }
 
         uint32_t itemCounter = 0;
         uint32_t nTransactionsCounter = 0;
@@ -429,6 +441,7 @@ __global__ void mine(uint32_t *base_pattern,
                 }
             }
         }
+        printf("util: %d\n", patternUtil);
 
         if (patternUtil >= minUtil)
         {
@@ -453,7 +466,7 @@ __global__ void mine(uint32_t *base_pattern,
             free(n_utility);
             free(n_subtree);
             free(n_local);
-            continue;
+            return;
         }
 
         uint32_t primary_count = 0;
@@ -487,14 +500,14 @@ __global__ void mine(uint32_t *base_pattern,
             free(n_utility);
             free(n_subtree);
             free(n_local);
-            continue;
+            return;
         }
         else
         {
-            mine<<<1, 1>>>(n_pattern, projection_items, itemCounter, n_start, n_end, n_utility, nTransactionsCounter, n_subtree, n_local, maxItem, pattern, minUtil, that_didnt_work);
+            mine<<<maxItem+1, 1>>>(n_pattern, projection_items, itemCounter, n_start, n_end, n_utility, nTransactionsCounter, n_subtree, n_local, maxItem, pattern, minUtil, that_didnt_work);
             // d_mine(n_pattern, projection_items, itemCounter, n_start, n_end, n_utility, nTransactionsCounter, n_subtree, n_local, maxItem, pattern, minUtil, that_didnt_work);
         }
-    }
+    // }
     // free all the memory
     // free(base_pattern);
     // free(items);
@@ -519,7 +532,7 @@ int main(int argc, char *argv[])
 {
 
     // set cuda heap size to 4GB
-    ssize_t heapSize = 4 * GIGA;
+    ssize_t heapSize = 6 * GIGA;
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
 
     // Parse command-line arguments:
@@ -587,32 +600,32 @@ int main(int argc, char *argv[])
         }
     }
 
-    // print db
-    for (size_t i = 0; i < start.size(); ++i)
-    {
-        for (size_t j = start[i]; j < end[i]; ++j)
-        {
-            std::cout << items[j].item << ":" << items[j].util << " ";
-        }
-        std::cout << std::endl;
-    }
+    // // print db
+    // for (size_t i = 0; i < start.size(); ++i)
+    // {
+    //     for (size_t j = start[i]; j < end[i]; ++j)
+    //     {
+    //         std::cout << items[j].item << ":" << items[j].util << " ";
+    //     }
+    //     std::cout << std::endl;
+    // }
 
-    // print primary
-    std::cout << "Primary: ";
-    for (size_t i = 0; i < primary.size(); ++i)
-    {
-        std::cout << primary[i] << " ";
-    }
-    std::cout << std::endl;
+    // // print primary
+    // std::cout << "Primary: ";
+    // for (size_t i = 0; i < primary.size(); ++i)
+    // {
+    //     std::cout << primary[i] << " ";
+    // }
+    // std::cout << std::endl;
 
-    // print secondary
-    std::cout << "Secondary: ";
-    for (size_t i = 0; i < secondary.size(); ++i)
-    {
-        std::cout << secondary[i] << " ";
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
+    // // print secondary
+    // std::cout << "Secondary: ";
+    // for (size_t i = 0; i < secondary.size(); ++i)
+    // {
+    //     std::cout << secondary[i] << " ";
+    // }
+    // std::cout << std::endl;
+    // std::cout << std::endl;
 
     // allocate all of them on cuda
     uint32_t *d_start, *d_end, *d_utility, *d_primary, *d_secondary;
@@ -646,7 +659,10 @@ int main(int argc, char *argv[])
 
     // call kernel
     std::cout << "Calling kernel" << std::endl;
-    mine<<<1, 1>>>(base_pattern, d_items, items.size(), d_start, d_end, d_utility, start.size(), d_primary, d_secondary, maxItem, d_pattern, minUtil, that_didnt_work);
+
+    // block size is 1, grid size is 
+
+    mine<<<maxItem + 1, 1>>>(base_pattern, d_items, items.size(), d_start, d_end, d_utility, start.size(), d_primary, d_secondary, maxItem, d_pattern, minUtil, that_didnt_work);
     cudaDeviceSynchronize();
 
     print_pattern<<<1, 1>>>(d_pattern);
