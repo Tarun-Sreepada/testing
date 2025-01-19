@@ -360,7 +360,7 @@ __global__ void mine(uint32_t *base_pattern,
             {
                 return;
             }
-        printf("i: %d\n", i);
+        // printf("i: %d\n", i);
 
 
         uint32_t *n_pattern = (uint32_t *)malloc(sizeof(uint32_t) * (base_pattern[0] + 1));
@@ -383,7 +383,7 @@ __global__ void mine(uint32_t *base_pattern,
         // check if memory is allocated
         if (projection_items == NULL || n_start == NULL || n_end == NULL || n_utility == NULL || n_subtree == NULL || n_local == NULL)
         {
-            printf("Memory allocation failed\n");
+            // printf("Memory allocation failed\n");
             return;
         }
 
@@ -441,7 +441,7 @@ __global__ void mine(uint32_t *base_pattern,
                 }
             }
         }
-        printf("util: %d\n", patternUtil);
+        // printf("util: %d\n", patternUtil);
 
         if (patternUtil >= minUtil)
         {
@@ -532,7 +532,7 @@ int main(int argc, char *argv[])
 {
 
     // set cuda heap size to 4GB
-    ssize_t heapSize = 6 * GIGA;
+    ssize_t heapSize = 2 * GIGA;
     cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapSize);
 
     // Parse command-line arguments:
