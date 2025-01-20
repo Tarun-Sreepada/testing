@@ -18,7 +18,7 @@ struct BumpAllocator {
 // Device function: bump allocator allocation (inline definition in header).
 // Marking it as static inline ensures that each translation unit gets its own copy.
 //------------------------------------------------------------------------------
-__device__ static inline void *bump_alloc(BumpAllocator *alloc, unsigned int size) {
+__device__ static inline char *bump_alloc(BumpAllocator *alloc, unsigned int size) {
     unsigned long long oldVal, newVal;
     while (true) {
         // Read the current allocation offset.
@@ -30,13 +30,13 @@ __device__ static inline void *bump_alloc(BumpAllocator *alloc, unsigned int siz
             // Attempt to atomically change the offset from oldVal to newVal.
             if (atomicCAS(&(alloc->offset), oldVal, newVal) == oldVal) {
                 // Allocation successful: return pointer from the beginning of the pool.
-                return reinterpret_cast<void*>(alloc->pool);
+                return (alloc->pool);
             }
         } else {
             // There is enough room at the end of the buffer.
             newVal = oldVal + size;
             if (atomicCAS(&(alloc->offset), oldVal, newVal) == oldVal) {
-                return reinterpret_cast<void*>(alloc->pool + oldVal);
+                return (alloc->pool + oldVal);
             }
         }
         // If the CAS failed, some other thread updated the offset.

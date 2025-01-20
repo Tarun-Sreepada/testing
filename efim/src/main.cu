@@ -17,6 +17,27 @@
 
 #define BUCKET_SCALE 3
 
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+   if (code != cudaSuccess) 
+   {
+      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
+}
+
+#include <assert.h>
+#define cdpErrchk(ans) { cdpAssert((ans), __FILE__, __LINE__); }
+__device__ void cdpAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+   if (code != cudaSuccess)
+   {
+      printf("GPU kernel assert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) assert(0);
+   }
+}
+
 struct Item
 {
     uint32_t id;
@@ -97,6 +118,331 @@ struct VectorComparator
 };
 
 
+__device__ void mine_kernel_d(BumpAllocator *alloc, uint32_t *pattern, Item *items, uint32_t nItems,
+                            uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t nTransactions,
+                            uint32_t *primary, uint32_t numPrimary, uint32_t maxItem,
+                            uint32_t minUtil, uint32_t *high_utility_patterns)
+{
+    // create scratch pad
+
+    // we need items, start, end, utility, local
+    // items + 3x transaction + maxItem * 3 (bucketSize)
+    uint32_t local_util_count = maxItem * 3;
+
+    uint32_t scratch_bytes = sizeof(Item) * nItems +
+                             sizeof(uint32_t) * nTransactions * 3 +
+                             sizeof(Item) * local_util_count * 2;
+
+    char *scratch = bump_alloc(alloc, scratch_bytes);
+
+    if (!scratch)
+    {
+        printf("Error allocating scratch pad.\n");
+        return;
+    }
+
+    Item *scratch_items = (Item *)scratch;
+    scratch += sizeof(Item) * nItems;
+
+    uint32_t *scratch_start = (uint32_t *)scratch;
+    scratch += sizeof(uint32_t) * nTransactions;
+    uint32_t *scratch_end = (uint32_t *)scratch;
+    scratch += sizeof(uint32_t) * nTransactions;
+    uint32_t *scratch_utility = (uint32_t *)scratch;
+    scratch += sizeof(uint32_t) * nTransactions;
+
+    Item *local_util = (Item *)scratch;
+    scratch += sizeof(Item) * local_util_count;
+    Item *subtree_util = (Item *)scratch;
+
+    printf("Num Primary: %d\n", numPrimary);
+    for (int i = 0; i < numPrimary; i++)
+    {
+        uint32_t item = primary[i];
+        printf("Item: %d\n", item);
+
+        // reset local utility
+        for (int j = 0; j < local_util_count; j++)
+        {
+            local_util[j].id = 0;
+            local_util[j].utility = 0;
+
+            subtree_util[j].id = 0;
+            subtree_util[j].utility = 0;
+        }
+
+        // find the item in the transactions
+        uint32_t item_counter = 0;
+        uint32_t transaction_counter = 0;
+        uint32_t pattern_utility = 0;
+
+        for (int j = 0; j < nTransactions; j++)
+        {
+            int idx = binarySearchItems(items, nItems, item, start[j], end[j] - start[j]);
+            uint32_t temp_util = 0;
+
+            if (idx != -1)
+            {
+                scratch_start[transaction_counter] = item_counter;
+                scratch_utility[transaction_counter] = items[idx].utility + utility[j];
+                pattern_utility += scratch_utility[transaction_counter];
+                temp_util = scratch_utility[transaction_counter];
+
+                for (int k = idx + 1; k < end[j]; k++)
+                {
+                    // printf("%d:%d ", items[k].id, items[k].utility);
+                    scratch_items[item_counter] = items[k];
+                    temp_util += items[k].utility;
+                    item_counter++;
+                }
+                // printf("|| %d ||%d\n", scratch_utility[transaction_counter], temp_util);
+
+                if (item_counter != scratch_start[transaction_counter])
+                {
+                    scratch_end[transaction_counter] = item_counter;
+                    transaction_counter++;
+                }
+
+                for (int k = idx + 1; k < end[j]; k++)
+                {
+                    // we do a hash of the item id to find where to put it in the local utility
+                    uint32_t hash = hashFunction(items[k].id, local_util_count);
+                    while (true)
+                    {
+                        if (local_util[hash].id == 0 || local_util[hash].id == items[k].id)
+                        {
+                            local_util[hash].id = items[k].id;
+                            local_util[hash].utility += temp_util;
+                            break;
+                        }
+                        else
+                        {
+                            // linear probing
+                            hash = (hash + 1) % local_util_count;
+                        }
+                    }
+                }
+            }
+        }
+        // printf("Pattern Utility: %d\n", pattern_utility);
+
+        // // print all local utility
+        // printf("Local Utility: \n");
+        // for (int j = 0; j < local_util_count; j++)
+        // {
+        //     if (local_util[j].id != 0)
+        //     {
+        //         printf("%d:%d ", local_util[j].id, local_util[j].utility);
+        //     }
+        // }
+        // printf("\n");
+
+        uint32_t *n_pattern;
+
+        // allocate new pattern if utility is greater than minUtil or transaction counter is greater than 1
+        if (pattern_utility >= minUtil || transaction_counter)
+        {
+            n_pattern = (uint32_t *)bump_alloc(alloc, sizeof(uint32_t) * (pattern[0] + 3));
+            if (!n_pattern)
+            {
+                printf("Error allocating new pattern.\n");
+                return;
+            }
+
+            memcpy(n_pattern, pattern, sizeof(uint32_t) * (pattern[0] + 1));
+            n_pattern[0] += 1;
+            n_pattern[n_pattern[0]] = item;
+
+            // print pattern
+            printf("Pattern: ");
+            for (int j = 0; j < n_pattern[0]; j++)
+            {
+                printf("%d ", n_pattern[j + 1]);
+            }
+            printf("\n");
+        }
+
+        if (pattern_utility >= minUtil)
+        {
+            // add pattern to high utility patterns [0 is number of patterns][1 is offset to start wiritn from]
+            atomicAdd(&high_utility_patterns[0], 1);
+            uint32_t offset = atomicAdd(&high_utility_patterns[1], n_pattern[0] + 2); // 1 for utilty and 1 spacer
+            for (int j = 0; j < n_pattern[0]; j++)
+            {
+                high_utility_patterns[offset + j] = n_pattern[j + 1];
+            }
+            high_utility_patterns[offset + n_pattern[0]] = pattern_utility;
+
+        }
+
+        if (transaction_counter)
+        {
+            printf("Transaction Counter: %d\n", transaction_counter);
+            // count number of local utility that is greater than minUtil
+            uint32_t local_util_counter = 0;
+            for (int j = 0; j < local_util_count; j++)
+            {
+                if (local_util[j].utility >= minUtil)
+                {
+                    local_util_counter++;
+                }
+            }
+
+            uint32_t total_bytes_req = sizeof(Item) * item_counter +
+                                       sizeof(uint32_t) * transaction_counter * 3 +
+                                       sizeof(uint32_t) * local_util_counter;
+            char *projection_ptr = bump_alloc(alloc, total_bytes_req);
+            if (!projection_ptr)
+            {
+                printf("Error allocating projection.\n");
+                return;
+            }
+
+            Item *projection_items = (Item *)projection_ptr;
+            projection_ptr += sizeof(Item) * item_counter;
+            uint32_t *projection_start = (uint32_t *)projection_ptr;
+            projection_ptr += sizeof(uint32_t) * transaction_counter;
+            uint32_t *projection_end = (uint32_t *)projection_ptr;
+            projection_ptr += sizeof(uint32_t) * transaction_counter;
+            uint32_t *projection_utility = (uint32_t *)projection_ptr;
+            projection_ptr += sizeof(uint32_t) * transaction_counter;
+            uint32_t *n_primary = (uint32_t *)projection_ptr;
+
+            uint32_t new_item_count = 0;
+            uint32_t new_transaction_count = 0;
+
+            for (int j = 0; j < nTransactions; j++)
+            {
+                if (scratch_start[j] != scratch_end[j])
+                {
+                    projection_start[new_transaction_count] = new_item_count;
+                    uint32_t temp_util = scratch_utility[j];
+
+                    for (int k = scratch_start[j]; k < scratch_end[j]; k++)
+                    {
+                        // check if the item is in the local utility and if it is greater than minUtil
+                        uint32_t hash = hashFunction(scratch_items[k].id, local_util_count);
+                        while (true)
+                        {
+                            if (local_util[hash].id == scratch_items[k].id)
+                            {
+                                if (local_util[hash].utility >= minUtil)
+                                {
+                                    projection_items[new_item_count] = scratch_items[k];
+                                    temp_util += scratch_items[k].utility;
+                                    new_item_count++;
+                                }
+                                break;
+                            }
+                            else
+                            {
+                                hash = (hash + 1) % local_util_count;
+                            }
+                        }
+                    }
+                    if (new_item_count != scratch_start[j])
+                    {
+                        projection_end[new_transaction_count] = new_item_count;
+                        projection_utility[new_transaction_count] = scratch_utility[j];
+                        new_transaction_count++;
+                    }
+
+                    // calc subtree utility
+                    uint32_t temp = 0;
+                    for (int k = projection_start[new_transaction_count - 1]; k < projection_end[new_transaction_count - 1]; k++)
+                    {
+                        uint32_t hash = hashFunction(projection_items[k].id, local_util_count);
+                        while (true)
+                        {
+                            if (subtree_util[hash].id == projection_items[k].id || subtree_util[hash].id == 0)
+                            {
+                                subtree_util[hash].id = projection_items[k].id;
+                                subtree_util[hash].utility += temp_util - temp;
+                                temp += projection_items[k].utility;
+                                break;
+                            }
+                            else
+                            {
+                                hash = (hash + 1) % local_util_count;
+                            }
+                        }
+                    }
+
+                    if (new_transaction_count == transaction_counter)
+                    {
+                        break;
+                    }
+
+                    // projection_end[new_transaction_count] = new_item_count;
+                    // new_transaction_count++;
+                }
+            }
+
+            // // print projected DB
+            // printf("Projected DB: \n");
+            // for (int j = 0; j < transaction_counter; j++)
+            // {
+            //     for (int k = scratch_start[j]; k < scratch_end[j]; k++)
+            //     {
+            //         printf("%d:%d ", scratch_items[k].id, scratch_items[k].utility);
+            //     }
+            //     printf("|| %d\n", scratch_utility[j]);
+            // }
+
+            // // print all subtree utility
+            // printf("Subtree Utility: \n");
+            // for (int j = 0; j < local_util_count; j++)
+            // {
+            //     if (subtree_util[j].id != 0)
+            //     {
+            //         printf("%d:%d ", subtree_util[j].id, subtree_util[j].utility);
+            //     }
+            // }
+
+            // printf("\n");
+
+            uint32_t primary_count = 0;
+            for (int j = 0; j < local_util_count; j++)
+            {
+                if (subtree_util[j].utility >= minUtil)
+                {
+                    n_primary[primary_count] = subtree_util[j].id;
+                    primary_count++;
+                }
+            }
+
+            // // print all primary
+            // printf("Primary: \n");
+            // for (int j = 0; j < primary_count; j++)
+            // {
+            //     printf("%d ", n_primary[j]);
+            // }
+            // printf("\n");
+            printf("Primary Count: %d\n", primary_count);
+
+            if (primary_count)
+            {
+                // mine_kernel<<<1,1>>>(alloc, 
+                //                     n_pattern, 
+                //                     projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
+                //                     n_primary, primary_count, local_util_counter,
+                //                     minUtil, high_utility_patterns);
+
+                cdpErrchk(cudaPeekAtLastError());
+
+                mine_kernel_d(alloc, 
+                                    n_pattern, 
+                                    projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
+                                    n_primary, primary_count, local_util_counter,
+                                    minUtil, high_utility_patterns);
+            }
+        }
+
+        // printf("\n");
+    }
+}
+
+
 
 __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items, uint32_t nItems,
                             uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t nTransactions,
@@ -113,7 +459,7 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
                              sizeof(uint32_t) * nTransactions * 3 +
                              sizeof(Item) * local_util_count * 2;
 
-    void *scratch = bump_alloc(alloc, scratch_bytes);
+    char *scratch = bump_alloc(alloc, scratch_bytes);
 
     if (!scratch)
     {
@@ -257,6 +603,7 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
         if (transaction_counter)
         {
             // count number of local utility that is greater than minUtil
+            // printf("Transaction Counter: %d\n", transaction_counter);
             uint32_t local_util_counter = 0;
             for (int j = 0; j < local_util_count; j++)
             {
@@ -269,7 +616,12 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
             uint32_t total_bytes_req = sizeof(Item) * item_counter +
                                        sizeof(uint32_t) * transaction_counter * 3 +
                                        sizeof(uint32_t) * local_util_counter;
-            void *projection_ptr = bump_alloc(alloc, total_bytes_req);
+            char *projection_ptr = bump_alloc(alloc, total_bytes_req);
+            if (!projection_ptr)
+            {
+                printf("Error allocating projection.\n");
+                return;
+            }
 
             Item *projection_items = (Item *)projection_ptr;
             projection_ptr += sizeof(Item) * item_counter;
@@ -385,6 +737,7 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
             }
 
             // // print all primary
+            // printf("Primary Count: %d\n", primary_count);
             // printf("Primary: \n");
             // for (int j = 0; j < primary_count; j++)
             // {
@@ -394,17 +747,19 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
 
             if (primary_count)
             {
-                mine_kernel<<<1,1>>>(alloc, 
-                                    n_pattern, 
-                                    projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
-                                    n_primary, primary_count, local_util_counter,
-                                    minUtil, high_utility_patterns);
-
-                // mine_kernel_d(alloc, 
+                // mine_kernel<<<1,1>>>(alloc, 
                 //                     n_pattern, 
                 //                     projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
                 //                     n_primary, primary_count, local_util_counter,
                 //                     minUtil, high_utility_patterns);
+
+                // cdpErrchk(cudaPeekAtLastError());
+
+                mine_kernel_d(alloc, 
+                                    n_pattern, 
+                                    projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
+                                    n_primary, primary_count, local_util_counter,
+                                    minUtil, high_utility_patterns);
             }
         }
 
@@ -427,6 +782,22 @@ public:
 
     void mine()
     {
+
+        size_t currentStackSize;
+        cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
+        printf("Current device stack size: %zu bytes\n", currentStackSize);
+
+        // cudaDeviceSetLimit(cudaLimitStackSize, 8192);
+        size_t stackSize = 64 * KILO; // 8192 per thread (adjust as needed)
+        cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, stackSize);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Failed to set device stack size (error code %s)!\n", cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }
+
+        cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
+        printf("Current device stack size: %zu bytes\n", currentStackSize);
+
         auto start_time = std::chrono::high_resolution_clock::now();
         std::map<std::vector<int>, Transaction, VectorComparator> transactions;
         std::vector<uint32_t> primary;
@@ -525,12 +896,14 @@ public:
                               d_primary, primary.size(), max_item,
                               minUtil, d_high_utility_patterns);
 
+        gpuErrchk(cudaPeekAtLastError());
 
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess)
-        {
-            std::cerr << "Kernel launch error: " << cudaGetErrorString(err) << std::endl;
-        }
+
+        // cudaError_t err = cudaGetLastError();
+        // if (err != cudaSuccess)
+        // {
+        //     std::cerr << "Kernel launch error: " << cudaGetErrorString(err) << std::endl;
+        // }
         cudaDeviceSynchronize();
 
         runtime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
