@@ -14,12 +14,23 @@ struct BumpAllocator {
     unsigned long long     offset;    // Current bump pointer offset (64-bit)
 };
 
+uint64_t next_pow2(uint64_t x) {
+	return x == 1 ? 1 : 1<<(64-__builtin_clzl(x-1));
+}
+
+__device__ uint64_t g_next_pow2(uint64_t x) {
+    return x == 1 ? 1 : 1<<(64-__clzll(x-1));
+}
+
 //------------------------------------------------------------------------------
 // Device function: bump allocator allocation (inline definition in header).
 // Marking it as static inline ensures that each translation unit gets its own copy.
 //------------------------------------------------------------------------------
-__device__ static inline char *bump_alloc(BumpAllocator *alloc, unsigned int size) {
+__device__ static inline char *bump_alloc(BumpAllocator *alloc, unsigned long long size) {
     unsigned long long oldVal, newVal;
+    // round up size to nearest power of 2
+    size = (size + 7) & ~7;
+
     while (true) {
         // Read the current allocation offset.
         oldVal = alloc->offset;
@@ -48,7 +59,7 @@ __device__ static inline char *bump_alloc(BumpAllocator *alloc, unsigned int siz
 // Host function: bump allocator allocation (for use on host).
 //------------------------------------------------------------------------------
 #ifdef __CUDACC__
-__host__ inline void *bump_alloc_host(BumpAllocator *alloc, size_t size) {
+__host__ inline void *bump_alloc_host(BumpAllocator *alloc, ssize_t size) {
     // Check if there is enough room in the pool
     if (alloc->offset + size > alloc->poolSize){
         std::cout << "Bump allocator out of memory || size: " << size 

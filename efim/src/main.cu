@@ -17,25 +17,33 @@
 
 #define BUCKET_SCALE 3
 
-#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+#define gpuErrchk(ans)                        \
+    {                                         \
+        gpuAssert((ans), __FILE__, __LINE__); \
+    }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
-   if (code != cudaSuccess) 
-   {
-      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-      if (abort) exit(code);
-   }
+    if (code != cudaSuccess)
+    {
+        fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+        if (abort)
+            exit(code);
+    }
 }
 
 #include <assert.h>
-#define cdpErrchk(ans) { cdpAssert((ans), __FILE__, __LINE__); }
-__device__ void cdpAssert(cudaError_t code, const char *file, int line, bool abort=true)
+#define cdpErrchk(ans)                        \
+    {                                         \
+        cdpAssert((ans), __FILE__, __LINE__); \
+    }
+__device__ void cdpAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
-   if (code != cudaSuccess)
-   {
-      printf("GPU kernel assert: %s %s %d\n", cudaGetErrorString(code), file, line);
-      if (abort) assert(0);
-   }
+    if (code != cudaSuccess)
+    {
+        printf("GPU kernel assert: %s %s %d\n", cudaGetErrorString(code), file, line);
+        if (abort)
+            assert(0);
+    }
 }
 
 struct Item
@@ -117,11 +125,10 @@ struct VectorComparator
     }
 };
 
-
 __device__ void mine_kernel_d(BumpAllocator *alloc, uint32_t *pattern, Item *items, uint32_t nItems,
-                            uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t nTransactions,
-                            uint32_t *primary, uint32_t numPrimary, uint32_t maxItem,
-                            uint32_t minUtil, uint32_t *high_utility_patterns)
+                              uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t nTransactions,
+                              uint32_t *primary, uint32_t numPrimary, uint32_t maxItem,
+                              uint32_t minUtil, uint32_t *high_utility_patterns)
 {
     // create scratch pad
 
@@ -272,7 +279,6 @@ __device__ void mine_kernel_d(BumpAllocator *alloc, uint32_t *pattern, Item *ite
                 high_utility_patterns[offset + j] = n_pattern[j + 1];
             }
             high_utility_patterns[offset + n_pattern[0]] = pattern_utility;
-
         }
 
         if (transaction_counter)
@@ -313,6 +319,7 @@ __device__ void mine_kernel_d(BumpAllocator *alloc, uint32_t *pattern, Item *ite
 
             for (int j = 0; j < nTransactions; j++)
             {
+                // printf("j: %d\n", j);
                 if (scratch_start[j] != scratch_end[j])
                 {
                     projection_start[new_transaction_count] = new_item_count;
@@ -377,6 +384,7 @@ __device__ void mine_kernel_d(BumpAllocator *alloc, uint32_t *pattern, Item *ite
                     // new_transaction_count++;
                 }
             }
+            printf("new_transaction_count: %d\n", new_transaction_count);
 
             // // print projected DB
             // printf("Projected DB: \n");
@@ -419,30 +427,27 @@ __device__ void mine_kernel_d(BumpAllocator *alloc, uint32_t *pattern, Item *ite
             // }
             // printf("\n");
             printf("Primary Count: %d\n", primary_count);
+            printf("\n");
 
             if (primary_count)
             {
-                // mine_kernel<<<1,1>>>(alloc, 
-                //                     n_pattern, 
+                // mine_kernel<<<1,1>>>(alloc,
+                //                     n_pattern,
                 //                     projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
                 //                     n_primary, primary_count, local_util_counter,
                 //                     minUtil, high_utility_patterns);
 
                 cdpErrchk(cudaPeekAtLastError());
 
-                mine_kernel_d(alloc, 
-                                    n_pattern, 
-                                    projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
-                                    n_primary, primary_count, local_util_counter,
-                                    minUtil, high_utility_patterns);
+                mine_kernel_d(alloc,
+                              n_pattern,
+                              projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
+                              n_primary, primary_count, local_util_counter,
+                              minUtil, high_utility_patterns);
             }
         }
-
-        // printf("\n");
     }
 }
-
-
 
 __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items, uint32_t nItems,
                             uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t nTransactions,
@@ -597,7 +602,6 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
                 high_utility_patterns[offset + j] = n_pattern[j + 1];
             }
             high_utility_patterns[offset + n_pattern[0]] = pattern_utility;
-
         }
 
         if (transaction_counter)
@@ -747,19 +751,19 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
 
             if (primary_count)
             {
-                // mine_kernel<<<1,1>>>(alloc, 
-                //                     n_pattern, 
+                // mine_kernel<<<1,1>>>(alloc,
+                //                     n_pattern,
                 //                     projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
                 //                     n_primary, primary_count, local_util_counter,
                 //                     minUtil, high_utility_patterns);
 
                 // cdpErrchk(cudaPeekAtLastError());
 
-                mine_kernel_d(alloc, 
-                                    n_pattern, 
-                                    projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
-                                    n_primary, primary_count, local_util_counter,
-                                    minUtil, high_utility_patterns);
+                mine_kernel_d(alloc,
+                              n_pattern,
+                              projection_items, new_item_count, projection_start, projection_end, projection_utility, new_transaction_count,
+                              n_primary, primary_count, local_util_counter,
+                              minUtil, high_utility_patterns);
             }
         }
 
@@ -790,7 +794,8 @@ public:
         // cudaDeviceSetLimit(cudaLimitStackSize, 8192);
         size_t stackSize = 64 * KILO; // 8192 per thread (adjust as needed)
         cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, stackSize);
-        if (err != cudaSuccess) {
+        if (err != cudaSuccess)
+        {
             fprintf(stderr, "Failed to set device stack size (error code %s)!\n", cudaGetErrorString(err));
             exit(EXIT_FAILURE);
         }
@@ -898,7 +903,6 @@ public:
 
         gpuErrchk(cudaPeekAtLastError());
 
-
         // cudaError_t err = cudaGetLastError();
         // if (err != cudaSuccess)
         // {
@@ -908,14 +912,12 @@ public:
 
         runtime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
 
-
         mb_used = static_cast<double>(alloc->offset) / static_cast<double>(MEGA);
         std::cout << "Bytes used by the allocator: " << alloc->offset << "\t(MB: " << mb_used << ")" << std::endl;
 
         // free device memory
         freeUnifiedBumpAllocator(alloc);
         printf("Number of high utility patterns: %d\n", d_high_utility_patterns[0]);
-
 
         // convert high utility patterns to string
         std::string high_utility_patterns_str = "";
@@ -946,16 +948,12 @@ public:
 
             high_utility_patterns_str = "";
             high_utility_patten.clear();
-
-
         }
         // // std::cout << high_utility_patterns_str << std::endl;
         // for (const auto &p : Patterns)
         // {
         //     std::cout << p.first << " : " << p.second << std::endl;
         // }
-
-
     }
 
     // Print final results.
@@ -975,19 +973,21 @@ public:
     double getRuntime() const { return runtime; }
 
     // Save results to a file.
-    void save(const std::string &outFile) {
+    void save(const std::string &outFile)
+    {
         std::ofstream writer(outFile);
-        if (!writer) {
+        if (!writer)
+        {
             std::cerr << "Error opening output file: " << outFile << "\n";
             return;
         }
         // Here we write the discovered patterns (stored in Patterns)
-        for (const auto &entry : Patterns) {
+        for (const auto &entry : Patterns)
+        {
             writer << entry.first << ":" << entry.second << "\n";
         }
         writer.close();
     }
-
 
 private:
     std::string inputFile;
@@ -1179,7 +1179,6 @@ int main(int argc, char *argv[])
         efim.mine();
         efim.printResults();
     }
-    
 
     return 0;
 }
