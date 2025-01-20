@@ -17,12 +17,32 @@ struct BumpAllocator {
 // Marking it as static inline ensures that each translation unit gets its own copy.
 //------------------------------------------------------------------------------
 __device__ static inline void *bump_alloc(BumpAllocator *alloc, unsigned int size) {
-    unsigned long long old = atomicAdd(&(alloc->offset), static_cast<unsigned long long>(size));
-    if (old + size > alloc->poolSize) {
-        return nullptr;
+    unsigned long long oldVal, newVal;
+    while (true) {
+        // Read the current allocation offset.
+        oldVal = alloc->offset;
+        if (oldVal + size > alloc->poolSize) {
+            // Not enough room at the end; wrap around.
+            // We prepare to allocate from offset 0.
+            newVal = size;
+            // Attempt to atomically change the offset from oldVal to newVal.
+            // Only one thread will succeed in “resetting” the offset.
+            if (atomicCAS(&(alloc->offset), oldVal, newVal) == oldVal) {
+                // Allocation successful: return pointer from the beginning of the pool.
+                return reinterpret_cast<void*>(alloc->pool);
+            }
+        } else {
+            // There is enough room at the end of the buffer.
+            newVal = oldVal + size;
+            if (atomicCAS(&(alloc->offset), oldVal, newVal) == oldVal) {
+                return reinterpret_cast<void*>(alloc->pool + oldVal);
+            }
+        }
+        // If the CAS failed, then some other thread updated the offset.
+        // Try again.
     }
-    return reinterpret_cast<void*>(alloc->pool + old);
 }
+
 
 //------------------------------------------------------------------------------
 // Host function: bump allocator allocation (for use on host).
