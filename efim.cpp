@@ -470,5 +470,6 @@ int main(int argc, char *argv[]) {
         miner.save(outFile);
         std::cout << "Patterns saved to: " << outFile << "\n";
     }
+    
     return 0;
 }

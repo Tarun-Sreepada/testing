@@ -45,7 +45,6 @@ readFile(const std::string &filename, char delimiter, uint32_t minUtil)
 {
     // Reserve some capacity for transactions if possible.
     std::vector<std::vector<Item>> transactions;
-    transactions.reserve(10000);
 
     std::map<uint32_t, uint32_t> twu; // transaction-weight utility for each item
 

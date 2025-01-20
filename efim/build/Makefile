@@ -129,30 +129,6 @@ cuEFIM/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/build
 .PHONY : cuEFIM/fast
 
-src/io.o: src/io.cpp.o
-.PHONY : src/io.o
-
-# target to build an object file
-src/io.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/io.cpp.o
-.PHONY : src/io.cpp.o
-
-src/io.i: src/io.cpp.i
-.PHONY : src/io.i
-
-# target to preprocess a source file
-src/io.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/io.cpp.i
-.PHONY : src/io.cpp.i
-
-src/io.s: src/io.cpp.s
-.PHONY : src/io.s
-
-# target to generate assembly for a file
-src/io.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/io.cpp.s
-.PHONY : src/io.cpp.s
-
 src/main.o: src/main.cu.o
 .PHONY : src/main.o
 
@@ -177,30 +153,6 @@ src/main.cu.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/main.cu.s
 .PHONY : src/main.cu.s
 
-src/mine.o: src/mine.cu.o
-.PHONY : src/mine.o
-
-# target to build an object file
-src/mine.cu.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/mine.cu.o
-.PHONY : src/mine.cu.o
-
-src/mine.i: src/mine.cu.i
-.PHONY : src/mine.i
-
-# target to preprocess a source file
-src/mine.cu.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/mine.cu.i
-.PHONY : src/mine.cu.i
-
-src/mine.s: src/mine.cu.s
-.PHONY : src/mine.s
-
-# target to generate assembly for a file
-src/mine.cu.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/cuEFIM.dir/build.make CMakeFiles/cuEFIM.dir/src/mine.cu.s
-.PHONY : src/mine.cu.s
-
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -210,15 +162,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... cuEFIM"
-	@echo "... src/io.o"
-	@echo "... src/io.i"
-	@echo "... src/io.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
-	@echo "... src/mine.o"
-	@echo "... src/mine.i"
-	@echo "... src/mine.s"
 .PHONY : help
 
 

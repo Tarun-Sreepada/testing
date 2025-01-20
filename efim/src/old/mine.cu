@@ -258,13 +258,13 @@ __device__ void mine_d(BumpAllocator *alloc, uint32_t *base_pattern,
 __global__ void mine(BumpAllocator *alloc, uint32_t *base_pattern,
                      Item *items, uint32_t nItems,
                      uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t nTransactions,
-                     uint32_t *primary, uint32_t maxItem,
+                     uint32_t *primary, uint32_t numPrimary, uint32_t maxItem,
                      uint32_t minUtil, uint32_t *pattern_counter)
 {
 
     uint32_t scratch_pad_total = sizeof(Item) * nItems + 
                                  sizeof(uint32_t) * nTransactions * 3 + 
-                                 sizeof(uint32_t) * (maxItem + 1);
+                                 sizeof(Item) * (maxItem + 1);
     
     void *scratch_pad = bump_alloc(alloc, scratch_pad_total);
 
@@ -279,10 +279,9 @@ __global__ void mine(BumpAllocator *alloc, uint32_t *base_pattern,
     uint32_t *scratch_local = (uint32_t *)scratch_pad;
 
 
-    for (int i = 0; i < maxItem + 1; i++)
+    for (int i = 0; i < numPrimary; i++)
     {
-        if (primary[i] == 0)
-            continue;
+        printf("Primary: %d\n", primary[i]);
 
         // reset local utility
         for (uint32_t j = 0; j < maxItem + 1; j++)
@@ -490,9 +489,9 @@ __global__ void mine(BumpAllocator *alloc, uint32_t *base_pattern,
             // call mine recursively
             if (primary_count)
             {
-                mine<<<1, 1>>>(alloc, n_pattern, projection_items, new_item_count, n_start, n_end,
-                               n_utility, new_transaction_count, n_subtree,
-                               maxItem, minUtil, pattern_counter);
+                // mine<<<1, 1>>>(alloc, n_pattern, projection_items, new_item_count, n_start, n_end,
+                //                n_utility, new_transaction_count, n_subtree,
+                //                maxItem, minUtil, pattern_counter);
                 // mine_d(alloc, n_pattern, projection_items, new_item_count, n_start, n_end,
                 //                n_utility, new_transaction_count, n_subtree,
                 //                maxItem, minUtil, pattern_counter);

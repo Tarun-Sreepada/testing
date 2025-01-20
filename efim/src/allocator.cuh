@@ -2,14 +2,16 @@
 #define ALLOCATOR_CUH
 
 #include <cuda_runtime.h>
+#include <iostream>
+#include <cstring> // for memcpy
 
 //------------------------------------------------------------------------------
-// 64-bit Bump Allocator structure
+// 64-bit Bump Allocator structure using unsigned long long for poolSize.
 //------------------------------------------------------------------------------
 struct BumpAllocator {
-    char          *pool;      // Pointer to memory pool (allocated in unified memory)
-    size_t         poolSize;  // Total size of the pool in bytes.
-    unsigned long long offset;  // Current bump pointer offset (64-bit)
+    char                  *pool;      // Pointer to memory pool (allocated in unified memory)
+    unsigned long long     poolSize;  // Total size of the pool in bytes (64-bit unsigned)
+    unsigned long long     offset;    // Current bump pointer offset (64-bit)
 };
 
 //------------------------------------------------------------------------------
@@ -26,7 +28,6 @@ __device__ static inline void *bump_alloc(BumpAllocator *alloc, unsigned int siz
             // We prepare to allocate from offset 0.
             newVal = size;
             // Attempt to atomically change the offset from oldVal to newVal.
-            // Only one thread will succeed in “resetting” the offset.
             if (atomicCAS(&(alloc->offset), oldVal, newVal) == oldVal) {
                 // Allocation successful: return pointer from the beginning of the pool.
                 return reinterpret_cast<void*>(alloc->pool);
@@ -38,20 +39,23 @@ __device__ static inline void *bump_alloc(BumpAllocator *alloc, unsigned int siz
                 return reinterpret_cast<void*>(alloc->pool + oldVal);
             }
         }
-        // If the CAS failed, then some other thread updated the offset.
+        // If the CAS failed, some other thread updated the offset.
         // Try again.
     }
 }
 
-
 //------------------------------------------------------------------------------
 // Host function: bump allocator allocation (for use on host).
-// This version is defined in a source file (or you can also inline it if desired).
 //------------------------------------------------------------------------------
 #ifdef __CUDACC__
 __host__ inline void *bump_alloc_host(BumpAllocator *alloc, size_t size) {
-    if (alloc->offset + size > alloc->poolSize)
+    // Check if there is enough room in the pool
+    if (alloc->offset + size > alloc->poolSize){
+        std::cout << "Bump allocator out of memory || size: " << size 
+                  << " offset: " << alloc->offset 
+                  << " poolSize: " << alloc->poolSize << std::endl;
         return nullptr;
+    }
     void *ptr = alloc->pool + alloc->offset;
     alloc->offset += size;
     return ptr;
@@ -59,10 +63,10 @@ __host__ inline void *bump_alloc_host(BumpAllocator *alloc, size_t size) {
 #endif
 
 //------------------------------------------------------------------------------
-// Other helper function declarations that can be defined either inline or in a .cu file.
-// For example:
+// Host helper functions to create and free a unified bump allocator.
+//------------------------------------------------------------------------------
 #ifdef __CUDACC__
-__host__ inline BumpAllocator *createUnifiedBumpAllocator(size_t poolSize) {
+__host__ inline BumpAllocator *createUnifiedBumpAllocator(unsigned long long poolSize) {
     BumpAllocator *alloc = nullptr;
     // Allocate the allocator structure in unified memory.
     cudaMallocManaged(&alloc, sizeof(BumpAllocator));
@@ -82,14 +86,13 @@ __host__ inline void freeUnifiedBumpAllocator(BumpAllocator *alloc) {
 
 //------------------------------------------------------------------------------
 // Template helper: Allocate memory from the bump allocator's pool and copy host data into it.
-// This version uses the host-side bump allocation routine.
 //------------------------------------------------------------------------------
 template <typename T>
 T *bump_allocate_and_copy(BumpAllocator *alloc, const T *host_data, size_t count) {
     size_t bytes = count * sizeof(T);
     T *dest = reinterpret_cast<T*>(bump_alloc_host(alloc, bytes));
     if (dest) {
-        // Since the memory is allocated in unified memory, we can use memcpy.
+        // Since the memory is allocated in unified memory, we can safely use memcpy.
         memcpy(dest, host_data, bytes);
     }
     return dest;
