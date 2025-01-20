@@ -64,6 +64,10 @@
         "condition_variable": "cpp",
         "map": "cpp",
         "fstream": "cpp",
-        "mutex": "cpp"
+        "mutex": "cpp",
+        "bitset": "cpp",
+        "set": "cpp",
+        "unordered_set": "cpp",
+        "regex": "cpp"
     }
 }

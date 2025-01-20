@@ -1,0 +1,3 @@
+/home/tarun/testing/efim/build/CMakeFiles/cuEFIM.dir
+/home/tarun/testing/efim/build/CMakeFiles/edit_cache.dir
+/home/tarun/testing/efim/build/CMakeFiles/rebuild_cache.dir

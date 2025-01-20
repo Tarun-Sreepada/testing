@@ -5,17 +5,17 @@
 #include <string>
 #include <map>
 #include <algorithm>
-#include <cstring> // for strcmp
+#include <cstring>
 #include <stdexcept>
 #include <stdint.h>
 #include <numeric>
 #include <tuple>
 
 #define KILO 1024ULL
-#define MEGA KILO *KILO
-#define GIGA KILO *MEGA // 1 GB
+#define MEGA KILO * KILO
+#define GIGA KILO * MEGA // 1 GB
 
-// nvcc -arch=sm_86 -rdc=true cuEFIM.cu -o cuEFIM
+// nvcc -O3 -arch=sm_86 -rdc=true cuEFIM.cu -o cuEFIM
 // ./cuEFIM data.txt \\s 50
 
 struct Item
@@ -342,7 +342,8 @@ __device__ void d_mine(uint32_t *base_pattern,
     free(primary);
     free(secondary);
 }
-
+//nvcc -O3 -arch=sm_86 -rdc=true cuEFIM.cu -o cuEFIM
+// ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' \\s 17000000
 // __global__ void mine(uint32_t *start, uint32_t *end, uint32_t *utility, uint32_t *primary, uint32_t *secondary, Item *items, uint32_t nTransactions, uint32_t nItems, uint32_t *pattern, uint32_t maxItem)
 __global__ void mine(uint32_t *base_pattern,
                      Item *items, uint32_t nItems,
@@ -460,12 +461,12 @@ __global__ void mine(uint32_t *base_pattern,
 
         if (nTransactionsCounter == 0)
         {
-            free(projection_items);
-            free(n_start);
-            free(n_end);
-            free(n_utility);
-            free(n_subtree);
-            free(n_local);
+            // free(projection_items);
+            // free(n_start);
+            // free(n_end);
+            // free(n_utility);
+            // free(n_subtree);
+            // free(n_local);
             return;
         }
 
