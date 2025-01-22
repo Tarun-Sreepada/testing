@@ -16,6 +16,7 @@
 #define GIGA KILO *MEGA
 
 #define BUCKET_SCALE 3
+#define WORK_QUEUE_CAPACITY 8192
 
 #define gpuErrchk(ans)                        \
     {                                         \
@@ -45,12 +46,6 @@ __device__ void cdpAssert(cudaError_t code, const char *file, int line, bool abo
             assert(0);
     }
 }
-
-struct Item
-{
-    uint32_t id;
-    uint32_t utility;
-};
 
 __device__ uint32_t pcg_hash(uint32_t input)
 {
@@ -771,6 +766,305 @@ __global__ void mine_kernel(BumpAllocator *alloc, uint32_t *pattern, Item *items
     }
 }
 
+// mine_kernel_buffer<<<1, 1>>>(alloc, workQueue, min_util, d_high_utility_patterns);
+__global__ void mine_kernel_buffer(BumpAllocator *alloc, AtomicWorkQueue<WorkItem, WORK_QUEUE_CAPACITY> *workQueue, uint32_t minUtil, uint32_t *high_utility_patterns)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    // get the workitem from the work queue and print number of primary
+    WorkItem wi;
+    while (workQueue->work_count > 0)
+    {
+        if (!workQueue->dequeue(wi)) continue;
+
+
+
+        // uint32_t local_util_count = workItem->maxItem * 3;
+        uint32_t scratch_bytes = sizeof(Item) * wi.num_items +
+                                 sizeof(uint32_t) * wi.num_transactions * 3 +
+                                 sizeof(Item) * wi.max_item * 3 * 2;
+
+        char *scratch = bump_alloc(alloc, scratch_bytes);
+
+        if (!scratch)
+        {
+            printf("Error allocating scratch pad.\n");
+            return;
+        }
+
+        Item *scratch_items = (Item *)scratch;
+        scratch += sizeof(Item) * wi.num_items;
+
+        uint32_t *scratch_start = (uint32_t *)scratch;
+        scratch += sizeof(uint32_t) * wi.num_transactions;
+        uint32_t *scratch_end = (uint32_t *)scratch;
+        scratch += sizeof(uint32_t) * wi.num_transactions;
+        uint32_t *scratch_utility = (uint32_t *)scratch;
+        scratch += sizeof(uint32_t) * wi.num_transactions;
+
+        Item *local_util = (Item *)scratch;
+        scratch += sizeof(Item) * wi.max_item * 3;
+        Item *subtree_util = (Item *)scratch;
+
+        // printf("Num Primary: %d\n", wi.num_primary);
+        for (int i = 0; i < wi.num_primary; i++)
+        {
+            uint32_t item = wi.primary[i];
+            // printf("Item: %d\n", item);
+
+            // reset local utility
+            for (int j = 0; j < wi.max_item * 3; j++)
+            {
+                local_util[j].id = 0;
+                local_util[j].utility = 0;
+
+                subtree_util[j].id = 0;
+                subtree_util[j].utility = 0;
+            }
+
+            // find the item in the transactions
+            uint32_t item_counter = 0;
+            uint32_t transaction_counter = 0;
+            uint32_t pattern_utility = 0;
+
+            for (int j = 0; j < wi.num_transactions; j++)
+            {
+                int idx = binarySearchItems(wi.items, wi.num_items, item, wi.start[j], wi.end[j] - wi.start[j]);
+                uint32_t temp_util = 0;
+
+                if (idx != -1)
+                {
+                    scratch_start[transaction_counter] = item_counter;
+                    scratch_utility[transaction_counter] = wi.items[idx].utility + wi.utility[j];
+                    pattern_utility += scratch_utility[transaction_counter];
+                    temp_util = scratch_utility[transaction_counter];
+
+                    for (int k = idx + 1; k < wi.end[j]; k++)
+                    {
+                        // printf("%d:%d ", wi.items[k].id, wi.items[k].utility);
+                        scratch_items[item_counter] = wi.items[k];
+                        temp_util += wi.items[k].utility;
+                        item_counter++;
+                    }
+                    // printf("|| %d ||%d\n", scratch_utility[transaction_counter], temp_util);
+
+                    if (item_counter != scratch_start[transaction_counter])
+                    {
+                        scratch_end[transaction_counter] = item_counter;
+                        transaction_counter++;
+                    }
+
+                    for (int k = idx + 1; k < wi.end[j]; k++)
+                    {
+                        // we do a hash of the item id to find where to put it in the local utility
+                        uint32_t hash = hashFunction(wi.items[k].id, wi.max_item * 3);
+                        while (true)
+                        {
+                            if (local_util[hash].id == 0 || local_util[hash].id == wi.items[k].id)
+                            {
+                                local_util[hash].id = wi.items[k].id;
+                                local_util[hash].utility += temp_util;
+                                break;
+                            }
+                            else
+                            {
+                                // linear probing
+                                hash = (hash + 1) % wi.max_item * 3;
+                            }
+                        }
+                    }
+                }
+            }
+
+            uint32_t *n_pattern;
+
+            // allocate new pattern if utility is greater than minUtil or transaction counter is greater than 1
+            if (pattern_utility >= minUtil || transaction_counter)
+            {
+                n_pattern = (uint32_t *)bump_alloc(alloc, sizeof(uint32_t) * (wi.pattern[0] + 3));
+                if (!n_pattern)
+                {
+                    printf("Error allocating new pattern.\n");
+                    return;
+                }
+
+                memcpy(n_pattern, wi.pattern, sizeof(uint32_t) * (wi.pattern[0] + 1));
+                n_pattern[0] += 1;
+                n_pattern[n_pattern[0]] = item;
+
+                // // print pattern
+                // printf("Pattern: ");
+                // for (int j = 0; j < n_pattern[0]; j++)
+                // {
+                //     printf("%d ", n_pattern[j + 1]);
+                // }
+                // printf(": %d\n", pattern_utility);
+            }
+
+            if (pattern_utility >= minUtil)
+            {
+                // add pattern to high utility patterns [0 is number of patterns][1 is offset to start wiritn from]
+                uint32_t ret = atomicAdd(&high_utility_patterns[0], 1);
+                printf("Pat count: %d\tTID: %d\n", ret, tid);
+                uint32_t offset = atomicAdd(&high_utility_patterns[1], n_pattern[0] + 2); // 1 for utilty and 1 spacer
+                for (int j = 0; j < n_pattern[0]; j++)
+                {
+                    high_utility_patterns[offset + j] = n_pattern[j + 1];
+                }
+                high_utility_patterns[offset + n_pattern[0]] = pattern_utility;
+            }
+
+            if (transaction_counter)
+            {
+                // count number of local utility that is greater than minUtil
+                // printf("Transaction Counter: %d\n", transaction_counter);
+                uint32_t local_util_counter = 0;
+                for (int j = 0; j < wi.max_item * 3; j++)
+                {
+                    if (local_util[j].utility >= minUtil)
+                    {
+                        local_util_counter++;
+                    }
+                }
+
+                uint32_t total_bytes_req = sizeof(Item) * item_counter +
+                                           sizeof(uint32_t) * transaction_counter * 3 +
+                                           sizeof(uint32_t) * local_util_counter;
+                char *projection_ptr = bump_alloc(alloc, total_bytes_req);
+                if (!projection_ptr)
+                {
+                    printf("Error allocating projection.\n");
+                    return;
+                }
+                // printf("Transaction Counter: %d\n", transaction_counter);
+
+                Item *projection_items = (Item *)projection_ptr;
+                projection_ptr += sizeof(Item) * item_counter;
+                uint32_t *projection_start = (uint32_t *)projection_ptr;
+                projection_ptr += sizeof(uint32_t) * transaction_counter;
+                uint32_t *projection_end = (uint32_t *)projection_ptr;
+                projection_ptr += sizeof(uint32_t) * transaction_counter;
+                uint32_t *projection_utility = (uint32_t *)projection_ptr;
+                projection_ptr += sizeof(uint32_t) * transaction_counter;
+                uint32_t *n_primary = (uint32_t *)projection_ptr;
+
+                uint32_t new_item_count = 0;
+                uint32_t new_transaction_count = 0;
+
+                for (int j = 0; j < wi.num_transactions; j++)
+                {
+                    if (scratch_start[j] != scratch_end[j])
+                    {
+                        // printf("j: %d\n", j);
+                        projection_start[new_transaction_count] = new_item_count;
+
+                        for (int k = scratch_start[j]; k < scratch_end[j]; k++)
+                        {
+                            // check if the item is in the local utility and if it is greater than minUtil
+                            uint32_t hash = hashFunction(scratch_items[k].id, wi.max_item * 3);
+                            while (true)
+                            {
+                                if (local_util[hash].id == scratch_items[k].id)
+                                {
+                                    if (local_util[hash].utility >= minUtil)
+                                    {
+                                        projection_items[new_item_count] = scratch_items[k];
+                                        new_item_count++;
+                                    }
+                                    break;
+                                }
+                                else
+                                {
+                                    hash = (hash + 1) % wi.max_item * 3;
+                                }
+                            }
+                        }
+                        projection_end[new_transaction_count] = new_item_count;
+                        projection_utility[new_transaction_count] = scratch_utility[j];
+
+                        new_transaction_count++;
+
+                        if (new_transaction_count == transaction_counter)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                // iterate through the projected transactions
+                for (int j = 0; j < new_transaction_count; j++)
+                {
+                    uint32_t temp_util = projection_utility[j];
+                    for (int k = projection_start[j]; k < projection_end[j]; k++)
+                    {   
+                        temp_util += projection_items[k].utility;
+                    }
+                    uint32_t temp = 0;
+                    for (int k = projection_start[j]; k < projection_end[j]; k++)
+                    {
+                        uint32_t hash = hashFunction(projection_items[k].id, wi.max_item * 3);
+                        while (true)
+                        {
+                            if (subtree_util[hash].id == projection_items[k].id || subtree_util[hash].id == 0)
+                            {
+                                subtree_util[hash].id = projection_items[k].id;
+                                subtree_util[hash].utility += temp_util - temp;
+                                temp += projection_items[k].utility;
+                                break;
+                            }
+                            else
+                            {
+                                hash = (hash + 1) % wi.max_item * 3;
+                            }
+                        }
+                    }
+                }
+
+
+                // printf("new_transaction_count: %d\n", new_transaction_count);
+
+                uint32_t primary_count = 0;
+                for (int j = 0; j < wi.max_item * 3; j++)
+                {
+                    if (subtree_util[j].id == 0)
+                        continue;
+                    // printf("%d:%d ", local_util[j].id, local_util[j].utility);
+                    if (subtree_util[j].utility >= minUtil)
+                    {
+                        n_primary[primary_count] = subtree_util[j].id;
+                        primary_count++;
+                    }
+                }
+
+                // printf("Primary Count: %d\n", primary_count);
+
+                if (primary_count)
+                {
+                    WorkItem this_thing;
+
+                    this_thing.pattern = n_pattern;
+                    this_thing.items = projection_items;
+                    this_thing.num_items = new_item_count;
+                    this_thing.start = projection_start;
+                    this_thing.end = projection_end;
+                    this_thing.utility = projection_utility;
+                    this_thing.num_transactions = new_transaction_count;
+                    this_thing.primary = n_primary;
+                    this_thing.num_primary = primary_count;
+                    this_thing.max_item = local_util_counter;
+                    while (!workQueue->enqueue(this_thing))
+                    {
+                    }
+                    // workQueue->enqueue(this_thing);
+                }
+            }
+
+        //     // printf("\n");
+        }
+
+        uint32_t old = atomicSub(&workQueue->work_count, 1);
+    }
+}
+
 class cuEFIM
 {
 public:
@@ -787,21 +1081,21 @@ public:
     void mine()
     {
 
-        size_t currentStackSize;
-        cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
-        printf("Current device stack size: %zu bytes\n", currentStackSize);
+        // size_t currentStackSize;
+        // cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
+        // printf("Current device stack size: %zu bytes\n", currentStackSize);
 
-        // cudaDeviceSetLimit(cudaLimitStackSize, 8192);
-        size_t stackSize = 64 * KILO; // 8192 per thread (adjust as needed)
-        cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, stackSize);
-        if (err != cudaSuccess)
-        {
-            fprintf(stderr, "Failed to set device stack size (error code %s)!\n", cudaGetErrorString(err));
-            exit(EXIT_FAILURE);
-        }
+        // // cudaDeviceSetLimit(cudaLimitStackSize, 8192);
+        // size_t stackSize = 64 * KILO; // 8192 per thread (adjust as needed)
+        // cudaError_t err = cudaDeviceSetLimit(cudaLimitStackSize, stackSize);
+        // if (err != cudaSuccess)
+        // {
+        //     fprintf(stderr, "Failed to set device stack size (error code %s)!\n", cudaGetErrorString(err));
+        //     exit(EXIT_FAILURE);
+        // }
 
-        cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
-        printf("Current device stack size: %zu bytes\n", currentStackSize);
+        // cudaDeviceGetLimit(&currentStackSize, cudaLimitStackSize);
+        // printf("Current device stack size: %zu bytes\n", currentStackSize);
 
         auto start_time = std::chrono::high_resolution_clock::now();
         std::map<std::vector<int>, Transaction, VectorComparator> transactions;
@@ -897,18 +1191,44 @@ public:
 
         std::cout << "Time to allocate and copy data to device: " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count() << " ms" << std::endl;
 
-        mine_kernel<<<1, 1>>>(alloc, d_pattern, d_items, items.size(), d_start, d_end, d_utility, transactions.size(),
-                              d_primary, primary.size(), max_item,
-                              minUtil, d_high_utility_patterns);
+        AtomicWorkQueue<WorkItem, WORK_QUEUE_CAPACITY> *workQueue;
+        cudaMallocManaged(&workQueue, sizeof(AtomicWorkQueue<WorkItem, WORK_QUEUE_CAPACITY>));
 
-        gpuErrchk(cudaPeekAtLastError());
+        // copy work items to device
+        WorkItem initial;
+        initial.pattern = d_pattern;
+        initial.items = d_items;
+        initial.num_items = items.size();
+        initial.start = d_start;
+        initial.end = d_end;
+        initial.utility = d_utility;
+        initial.num_transactions = transactions.size();
+        initial.primary = d_primary;
+        initial.num_primary = primary.size();
+        initial.max_item = max_item;
 
-        // cudaError_t err = cudaGetLastError();
-        // if (err != cudaSuccess)
-        // {
-        //     std::cerr << "Kernel launch error: " << cudaGetErrorString(err) << std::endl;
-        // }
+        // initialize work queue
+        workQueue->init();
+
+        // enqueue initial work item
+        workQueue->host_enqueue(initial);
+
+        // print work count
+        printf("Work Count: %d\n", workQueue->work_count);
+
+        mine_kernel_buffer<<<64, 1>>>(alloc, workQueue, minUtil, d_high_utility_patterns);
         cudaDeviceSynchronize();
+        std::cout << "Work Count: " << workQueue->work_count << std::endl;
+
+        while (workQueue->work_count > 0)
+        {
+            mine_kernel_buffer<<<64, 1>>>(alloc, workQueue, minUtil, d_high_utility_patterns);
+            cudaDeviceSynchronize();
+            std::cout << "Work Count: " << workQueue->work_count << std::endl;
+            std::cout << "Patterns: " << d_high_utility_patterns[0] << std::endl;   
+            // print pattern of WorkItem at the top of the queue
+            
+        }
 
         runtime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
 
@@ -926,12 +1246,9 @@ public:
         {
             while (d_high_utility_patterns[i + 2] != 0)
             {
-                // high_utility_patterns_str += std::to_string(d_high_utility_patterns[i + 2]) + " ";
                 high_utility_patten.push_back(d_high_utility_patterns[i + 2]);
                 i++;
             }
-            // high_utility_patterns_str += "| ";
-            // convert all except the last one
             // if empty, skip
             if (high_utility_patten.size() == 0)
             {
@@ -942,8 +1259,6 @@ public:
             {
                 high_utility_patterns_str += std::to_string(high_utility_patten[j]) + " ";
             }
-            // Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
-            // std::cout << high_utility_patterns_str << ": " << high_utility_patten[high_utility_patten.size() - 1] << std::endl;
             Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
 
             high_utility_patterns_str = "";
