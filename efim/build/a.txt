@@ -1,8 +1,0 @@
-Time to read file: 2408 ms
-Number of transactions: 339299
-Number of items: 91
-Max item id: 91
-Allocating 8589934592 bytes for the bump allocator.
-Bytes used by the allocator: 0	(MB: 0)
-Bytes used by the allocator: 88731352	(MB: 84.6208)
-Time to allocate and copy data to device: 2859 ms
