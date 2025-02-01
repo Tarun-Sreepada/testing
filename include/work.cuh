@@ -29,7 +29,7 @@ struct WorkItem {
 };
 
 
-typedef struct {
+struct ProjectionMemory{
     int *n_pattern;
     Item *n_items;
     int *n_start;
@@ -41,7 +41,21 @@ typedef struct {
     int *work_done;
     int bytes_to_alloc;
     void *base_ptr;
-} ProjectionMemory;
+} ;
+
+
+typedef struct {
+    int item_counter;
+    int transaction_counter;
+    int pattern_utility;
+} ProjectionResult;
+
+
+typedef struct {
+    int new_item_counter;
+    int new_transaction_counter;
+} MergeResult;
+
 
 
 // The atomic work stack structure stored in device memory.
@@ -62,6 +76,7 @@ __device__ void stack_init(AtomicWorkStack *s) {
 // Push (thread-safe) – equivalent to DFS "enqueue".
 // Returns true if the push succeeds, false if the stack is full.
 __device__ bool stack_push(AtomicWorkStack *s, WorkItem item) {
+    atomicAdd(&(s->work_count), 1);
     while (true) {
         // Read the current top value.
         unsigned int curTop = s->top;
@@ -76,7 +91,6 @@ __device__ bool stack_push(AtomicWorkStack *s, WorkItem item) {
             // We succeeded in incrementing the top.
             s->items[curTop] = item;
             // Atomically increment the work_count.
-            atomicAdd(&(s->work_count), 1);
             return true;
         }
         // Otherwise, another thread updated s->top, so try again.
@@ -108,5 +122,6 @@ __device__ bool stack_pop(AtomicWorkStack *s, WorkItem *out) {
 // Get the current work_count.
 __device__ unsigned int stack_get_work_count(AtomicWorkStack *s) {
     // Since work_count is updated atomically via atomicAdd, a plain read is acceptable.
-    return s->work_count;
+    // return s->work_count;
+    return atomicAdd(&(s->work_count), 0);
 }
