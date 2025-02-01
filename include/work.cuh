@@ -90,8 +90,8 @@ __device__ bool stack_push(AtomicWorkStack *s, WorkItem item) {
             // We succeeded in incrementing the top.
             s->items[curTop] = item;
             // Atomically increment active.
-            atomicAdd(&(s->active), 1);
-            __threadfence();
+            // atomicAdd(&(s->active), 1);
+            __threadfence_system();
             return true;
         }
         // Otherwise, another thread updated s->top, so try again.

@@ -227,6 +227,8 @@ __device__ void acquireLock(int* lock) {
     while (atomicCAS(lock, 0, 1) != 0) {
         // A short busy-wait loop.
         // for (volatile int i = 0; i < 100; i++) { }
+        // __nanosleep(10);
+        // __threadfence_system();
     }
 }
 
@@ -238,20 +240,13 @@ __device__ void releaseLock(int* lock) {
 // Bitset helper functions (device-side)
 //----------------------------------------------------------------------
 
-// Check if the given page is allocated.
-__device__ int isPageAllocated(CudaMemoryManager* mgr, size_t pageIndex) {
-    size_t wordIndex = pageIndex / BITS_PER_WORD;
-    unsigned int bitMask = 1U << (pageIndex % BITS_PER_WORD);
-    // Use atomicAdd(...,0) for a safe read.
-    unsigned int wordVal = atomicAdd(&mgr->bitset[wordIndex], 0);
-    return (wordVal & bitMask) != 0;
-}
 
 // Mark a page as allocated.
 __device__ void markPageAllocated(CudaMemoryManager* mgr, size_t pageIndex) {
     size_t wordIndex = pageIndex / BITS_PER_WORD;
     unsigned int bitMask = 1U << (pageIndex % BITS_PER_WORD);
     atomicOr(&mgr->bitset[wordIndex], bitMask);
+    // mgr->bitset[wordIndex] |= bitMask;
 }
 
 // Mark a page as free.
@@ -259,6 +254,7 @@ __device__ void markPageFree(CudaMemoryManager* mgr, size_t pageIndex) {
     size_t wordIndex = pageIndex / BITS_PER_WORD;
     unsigned int bitMask = ~(1U << (pageIndex % BITS_PER_WORD));
     atomicAnd(&mgr->bitset[wordIndex], bitMask);
+    // mgr->bitset[wordIndex] &= bitMask;
 }
 
 //----------------------------------------------------------------------
@@ -362,15 +358,7 @@ __device__ void deviceMemFree(CudaMemoryManager* mgr, void* ptr, size_t bytes) {
 // Host-side initialization for CudaMemoryManager using a bitset
 //----------------------------------------------------------------------
 
-/*
- * createCudaMemoryManager:
- *   Initializes a CudaMemoryManager for a memory pool of totalBytes bytes,
- *   divided into pages of size pageSize.
- *
- *   Returns a pointer to a unified-memory allocated CudaMemoryManager,
- *   or nullptr if allocation fails.
- */
-CudaMemoryManager* createMemoryManager(unsigned int numPages, unsigned int pageSize) {
+CudaMemoryManager* createMemoryManager(unsigned long long total_bytes, unsigned int pageSize) {
     cudaError_t err;
 
     // Allocate unified memory for the manager structure.
@@ -381,20 +369,29 @@ CudaMemoryManager* createMemoryManager(unsigned int numPages, unsigned int pageS
         return nullptr;
     }
 
+    // Calculate the total number of pages (rounding up).
+    size_t numPages = (total_bytes + pageSize - 1) / pageSize;
+
     mgr->pageSize = pageSize;
     mgr->numPages = numPages;
 
     // Allocate the memory pool.
     err = cudaMallocManaged(&mgr->pool, mgr->numPages * pageSize * 1ULL);
+
     if (err != cudaSuccess) {
         printf("Error allocating pool: %s\n", cudaGetErrorString(err));
         cudaFree(mgr);
         return nullptr;
     }
 
+    std::cout << "Allocated: " << mgr->numPages * pageSize * 1ULL  / (1024 * 1024) << " MB" << std::endl;
+    std::cout << "Num pages: " << mgr->numPages << std::endl;
+    std::cout << "Page size: " << mgr->pageSize << std::endl;
+
     // Allocate the bitset.
     mgr->bitsetLength = (mgr->numPages + BITS_PER_WORD - 1) / BITS_PER_WORD;
-    err = cudaMallocManaged(&mgr->bitset, mgr->bitsetLength * sizeof(unsigned int));
+    std::cout << "Bitset length: " << mgr->bitsetLength << std::endl;
+    err = cudaMalloc(&mgr->bitset, mgr->bitsetLength * sizeof(unsigned int));
     if (err != cudaSuccess) {
         printf("Error allocating bitset: %s\n", cudaGetErrorString(err));
         cudaFree(mgr->pool);
@@ -403,9 +400,10 @@ CudaMemoryManager* createMemoryManager(unsigned int numPages, unsigned int pageS
     }
 
     // Initialize the bitset (all pages free).
-    for (size_t i = 0; i < mgr->bitsetLength; i++) {
-        mgr->bitset[i] = 0;
-    }
+    // for (size_t i = 0; i < mgr->bitsetLength; i++) {
+    //     mgr->bitset[i] = 0;
+    // }
+    cudaMemset(mgr->bitset, 0, mgr->bitsetLength * sizeof(unsigned int));
 
     // Initialize the lock.
     mgr->lock = 0;

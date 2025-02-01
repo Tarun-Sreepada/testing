@@ -17,7 +17,7 @@
 
 #define scale 2
 #define page_size 512
-#define page_count 12 * MEGA
+#define total_memory 6 * GIGA
 
 #define blocks 32
 
@@ -123,6 +123,7 @@ __global__ void copy(
 
         stack_push(work_queue, work_item);
     }
+    atomicAdd(&work_queue->active, num_primary);
 }
 
 __device__ ProjectionMemory allocateProjectionMemory(CudaMemoryManager *memory_manager,const WorkItem *work_item) {
@@ -225,11 +226,13 @@ __device__ ProjectionResult performProjection(const WorkItem *work_item, Project
 
 __device__ void storeHighUtilityPattern(const ProjectionMemory *pm, int pattern_utility,
                              int *high_utility_patterns, int min_util) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
     if (pattern_utility >= min_util) {
         // Update the count of high utility patterns.
         // high_utility_patterns[0]++;  
         atomicAdd(&high_utility_patterns[0], 1);
-        printf("High Utility Patterns: %d\n", high_utility_patterns[0]);
+        printf("%d|High Utility Patterns: %d\n", tid, high_utility_patterns[0]);
         // Compute an offset to store the new pattern.
         // int offset = (high_utility_patterns[1] += pm->n_pattern[0] + 2);
         int offset = atomicAdd(&high_utility_patterns[1], pm->n_pattern[0] + 2);
@@ -374,6 +377,7 @@ __device__ void pushNewWorkItems(AtomicWorkStack *q, const WorkItem *old_work_it
             local_util_counter++;
     }
 
+
     for (int i = 0; i < old_work_item->max_item * scale; i++) {
         if (pm->subtree_util[i].util < min_util)
             continue;
@@ -396,6 +400,7 @@ __device__ void pushNewWorkItems(AtomicWorkStack *q, const WorkItem *old_work_it
         // stack_push(q, new_work_item);
         while (!stack_push(q, new_work_item)) {}
     }
+    atomicAdd(&q->active, subtree_util_counter);
 }
 
 
@@ -404,19 +409,26 @@ __global__ void mine(CudaMemoryManager *memory_manager, AtomicWorkStack *work_qu
     WorkItem work_item;
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-    while (stack_get_work_count(work_queue) > 0)
+    while (work_queue->active)
     {
-        if (!stack_pop(work_queue, &work_item)) continue; // queue is momentarily empty
-        // printf("%d|Work Count: %d\n", tid, stack_get_work_count(work_queue));
+        
+        if (!stack_pop(work_queue, &work_item)) 
+        {
+            // __nanosleep(100);
+            // __threadfence_system();
+            continue; // queue is momentarily empty
+        }
 
         // 1. Allocate memory for projection.
         ProjectionMemory pm = allocateProjectionMemory(memory_manager, &work_item);
         if (pm.base_ptr == nullptr) {
             atomicSub(&work_queue->active, 1);
-            __threadfence_system();
+            // work_queue->active--;
+            // __threadfence_system();
 
-            // // push the work item back to the queue
-            // while (!stack_push(work_queue, work_item)) {}
+            // push the work item back to the queue
+            while (!stack_push(work_queue, work_item)) {}
+            atomicAdd(&work_queue->active, 1);
 
 
             printf("Failed to allocate memory for projection\n");
@@ -466,9 +478,9 @@ __global__ void mine(CudaMemoryManager *memory_manager, AtomicWorkStack *work_qu
 
         // printf("\n");
         atomicSub(&work_queue->active, 1);
-        __threadfence_system();
+        // __threadfence_system();
     }
-    printf("Thread %d finished\n", tid);
+    // printf("Thread %d finished\n", tid);
 }
 
 int main(int argc, char *argv[])
@@ -524,13 +536,13 @@ int main(int argc, char *argv[])
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
     int32_t *d_high_utility_patterns;
-    cudaMallocManaged(&d_high_utility_patterns, 1024ULL * 1024ULL * 1024ULL); // 1GB
+    cudaMallocManaged(&d_high_utility_patterns, 128 * MEGA); // 1GB
     d_high_utility_patterns[1] = 2;
 
     // memory
-    std::cout << "Allocating Memory: " << page_count * page_size << " bytes\t(MB: " << (page_count * page_size) / (MEGA) << ")\n";
+    // std::cout << "Allocating Memory: " << page_count * page_size << " bytes\t(MB: " << (page_count * page_size) / (MEGA) << ")\n";
 
-    CudaMemoryManager *memory_manager = createMemoryManager(page_count, page_size);
+    CudaMemoryManager *memory_manager = createMemoryManager(total_memory, page_size);
 
     // start work queue
     // AtomicWorkQueue<WorkItem, work_queue_size> *work_queue;
