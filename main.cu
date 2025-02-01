@@ -223,10 +223,12 @@ __device__ void storeHighUtilityPattern(const ProjectionMemory *pm, int pattern_
                              int *high_utility_patterns, int min_util) {
     if (pattern_utility >= min_util) {
         // Update the count of high utility patterns.
-        high_utility_patterns[0]++;  
+        // high_utility_patterns[0]++;  
+        atomicAdd(&high_utility_patterns[0], 1);
         printf("High Utility Patterns: %d\n", high_utility_patterns[0]);
         // Compute an offset to store the new pattern.
-        int offset = (high_utility_patterns[1] += pm->n_pattern[0] + 2);
+        // int offset = (high_utility_patterns[1] += pm->n_pattern[0] + 2);
+        int offset = atomicAdd(&high_utility_patterns[1], pm->n_pattern[0] + 2);
         for (int i = 0; i < pm->n_pattern[0]; i++) {
             high_utility_patterns[offset + i] = pm->n_pattern[i + 1];
         }
@@ -387,7 +389,8 @@ __device__ void pushNewWorkItems(AtomicWorkStack *q, const WorkItem *old_work_it
         new_work_item.bytes           = pm->bytes_to_alloc;
         new_work_item.base_ptr        = pm->base_ptr;
 
-        stack_push(q, new_work_item);
+        // stack_push(q, new_work_item);
+        while (!stack_push(q, new_work_item)) {}
     }
 }
 
@@ -396,17 +399,24 @@ template <typename MemoryManagerType>
 __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_queue, int min_util, int *high_utility_patterns)
 {
     WorkItem work_item;
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
     while (stack_get_work_count(work_queue) > 0)
     {
-        if (!stack_pop(work_queue, &work_item)) continue;
-        printf("Work Count: %d\n", stack_get_work_count(work_queue));
+        if (!stack_pop(work_queue, &work_item)) continue; // queue is momentarily empty
+        // printf("Work Count: %d\n", stack_get_work_count(work_queue));
 
         // 1. Allocate memory for projection.
         ProjectionMemory pm = allocateProjectionMemory(memory_manager, &work_item);
         if (pm.base_ptr == nullptr) {
-            atomicSub(&work_queue->work_count, 1);
-            // printf("Failed to allocate memory for projection\n");
+            atomicSub(&work_queue->active, 1);
+            __threadfence();
+
+            // // push the work item back to the queue
+            // while (!stack_push(work_queue, work_item)) {}
+
+
+            printf("Failed to allocate memory for projection\n");
             continue;
         }
 
@@ -415,7 +425,7 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
         copyAndExtendPattern(&work_item, &pm);
 
         // 3. Perform projection.
-        printf("Performing Projection\t");
+        // printf("%d:Performing Projection\n", tid);
         ProjectionResult proj = performProjection(&work_item, &pm);
 
         // 4. Store high utility pattern if threshold met.
@@ -424,14 +434,14 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
 
         // If no valid transactions were found, free and update work_done.
         if (proj.transaction_counter == 0) {
-            printf("No valid transactions found\n");
+            // printf("No valid transactions found\n");
             memory_manager->free(pm.base_ptr);
             checkAndFreeWorkItem(memory_manager, &work_item);
             continue;
         }
 
 
-        printf("Trimming and Merging\n");
+        // printf("%d:Trimming and Merging\n", tid);
         MergeResult mergeRes = trimMergeAndComputeSubtree(&work_item, &pm,
                                                           proj.transaction_counter, min_util);
 
@@ -450,7 +460,8 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
         checkAndFreeWorkItem(memory_manager, &work_item);
 
         // printf("\n");
-        atomicSub(&work_queue->work_count, 1);
+        atomicSub(&work_queue->active, 1);
+        __threadfence();
     }
 }
 
@@ -531,7 +542,7 @@ int main(int argc, char *argv[])
     cudaFree(d_end);
     cudaFree(d_primary);
 
-    mine<<<1, 1>>>(mm.getDeviceMemoryManager(), work_queue, args.utility, d_high_utility_patterns);
+    mine<<<32, 1>>>(mm.getDeviceMemoryManager(), work_queue, args.utility, d_high_utility_patterns);
     HANDLE_ERROR(cudaDeviceSynchronize());
 
     std::cout << "High Utility Patterns: " << d_high_utility_patterns[0] << "\n";
@@ -563,11 +574,10 @@ int main(int argc, char *argv[])
         high_utility_patterns_str = "";
         high_utility_patten.clear();
     }
-    // std::cout << high_utility_patterns_str << std::endl;
-    // for (const auto &p : Patterns)
-    // {
-    //     std::cout << p.first << "UTIL: " << p.second << std::endl;
-    // }
+    for (const auto &p : Patterns)
+    {
+        std::cout << p.first << "UTIL: " << p.second << std::endl;
+    }
 
     std::cout << "High Utility Patterns: " << d_high_utility_patterns[0] << "\n";
 

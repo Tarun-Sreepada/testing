@@ -64,19 +64,18 @@ struct AtomicWorkStack {
     // 'top' is the index of the next free slot (i.e., valid items are in indices 0..top-1).
     unsigned int top;
     // A counter for the number of work items pushed.
-    unsigned int work_count;
+    unsigned int active;
 };
 
 // Initialize the stack (to be called from a kernel or a __device__ function).
 __device__ void stack_init(AtomicWorkStack *s) {
     s->top = 0;
-    s->work_count = 0;
+    s->active = 0;
 }
 
 // Push (thread-safe) – equivalent to DFS "enqueue".
 // Returns true if the push succeeds, false if the stack is full.
 __device__ bool stack_push(AtomicWorkStack *s, WorkItem item) {
-    atomicAdd(&(s->work_count), 1);
     while (true) {
         // Read the current top value.
         unsigned int curTop = s->top;
@@ -90,7 +89,9 @@ __device__ bool stack_push(AtomicWorkStack *s, WorkItem item) {
         if (prev == curTop) {
             // We succeeded in incrementing the top.
             s->items[curTop] = item;
-            // Atomically increment the work_count.
+            // Atomically increment active.
+            atomicAdd(&(s->active), 1);
+            __threadfence();
             return true;
         }
         // Otherwise, another thread updated s->top, so try again.
@@ -123,5 +124,5 @@ __device__ bool stack_pop(AtomicWorkStack *s, WorkItem *out) {
 __device__ unsigned int stack_get_work_count(AtomicWorkStack *s) {
     // Since work_count is updated atomically via atomicAdd, a plain read is acceptable.
     // return s->work_count;
-    return atomicAdd(&(s->work_count), 0);
+    return atomicAdd(&(s->active), 0);
 }
