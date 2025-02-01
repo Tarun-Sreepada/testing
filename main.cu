@@ -476,7 +476,6 @@ int main(int argc, char *argv[])
     }
 
     ReadFileResult fileResult = read_file(args.filename, args.separator, args.utility);
-    // Note: Replace " " and 100 with actual `sep` and `minUtil` as needed
 
     // Access the parsed data
     auto &filteredTransactions = fileResult.filteredTransactions;
@@ -542,7 +541,7 @@ int main(int argc, char *argv[])
     cudaFree(d_end);
     cudaFree(d_primary);
 
-    mine<<<32, 1>>>(mm.getDeviceMemoryManager(), work_queue, args.utility, d_high_utility_patterns);
+    mine<<<2, 1>>>(mm.getDeviceMemoryManager(), work_queue, args.utility, d_high_utility_patterns);
     HANDLE_ERROR(cudaDeviceSynchronize());
 
     std::cout << "High Utility Patterns: " << d_high_utility_patterns[0] << "\n";
