@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-#define CAPACITY 8192
+#define CAPACITY 16384
 
 struct Item {
     int key;

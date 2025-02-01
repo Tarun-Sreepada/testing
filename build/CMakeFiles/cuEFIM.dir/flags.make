@@ -11,7 +11,7 @@ CUDA_FLAGS = -std=c++20 "--generate-code=arch=compute_75,code=[compute_75,sm_75]
 
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/tarun/testing/include -I/home/tarun/testing/external/Ouroboros/include
+CXX_INCLUDES = -I/home/tarun/testing/include
 
 CXX_FLAGS = -std=gnu++20 -O3
 

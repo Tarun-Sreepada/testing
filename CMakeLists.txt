@@ -20,8 +20,6 @@ set(CMAKE_CUDA_ARCHITECTURES 75)
 # Automatically collect all .cpp and .cu files in src/
 file(GLOB SRC_FILES "src/*.cpp" "src/*.cu")
 
-# Add external/ouroboros subdirectory
-add_subdirectory(external/Ouroboros)
 
 # Create executable, including main.cu
 add_executable(${PROJECT_NAME} main.cu ${SRC_FILES})
@@ -29,7 +27,6 @@ add_executable(${PROJECT_NAME} main.cu ${SRC_FILES})
 # Include directories for your project and ouroboros
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/external/Ouroboros/include
 )
 
 # Add -O3 optimization to both host (CXX) and device (CUDA) code.

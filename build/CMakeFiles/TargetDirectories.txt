@@ -1,5 +1,3 @@
 /home/tarun/testing/build/CMakeFiles/cuEFIM.dir
 /home/tarun/testing/build/CMakeFiles/edit_cache.dir
 /home/tarun/testing/build/CMakeFiles/rebuild_cache.dir
-/home/tarun/testing/build/external/Ouroboros/CMakeFiles/edit_cache.dir
-/home/tarun/testing/build/external/Ouroboros/CMakeFiles/rebuild_cache.dir

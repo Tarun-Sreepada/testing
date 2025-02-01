@@ -9,13 +9,17 @@
 #include "args.h"   // Include the args parser
 #include "parser.h" // Include the file reader
 #include "work.cuh" // Include the work queue
+#include "memory.cuh" // Include the memory manager
 
-#include "device/Ouroboros_impl.cuh"
-#include "device/MemoryInitialization.cuh"
-#include "InstanceDefinitions.cuh"
-#include "Utility.h"
+#define KILO 1024ULL
+#define MEGA KILO * KILO
+#define GIGA KILO * MEGA
 
 #define scale 2
+#define page_size 512
+#define page_count 12 * MEGA
+
+#define blocks 32
 
 // Binary Search Utility
 __device__ int binarySearchItems(const Item *items, int n, uint32_t search_id, int offset, int length)
@@ -53,9 +57,8 @@ __device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
     return hash % tableSize;
 }
 
-template <typename MemoryManagerType>
 __global__ void copy(
-    MemoryManagerType *memory_manager,
+    CudaMemoryManager *memory_manager,
     AtomicWorkStack *work_queue,
     Item *items,
     int *start,
@@ -74,10 +77,11 @@ __global__ void copy(
                             item_count * sizeof(Item) +      // items
                             num_transactions * sizeof(int) + // start
                             num_transactions * sizeof(int) + // end
-                            num_transactions * sizeof(int);  // utility
-    2 * sizeof(int);                                         // work_done
+                            num_transactions * sizeof(int) +   // utility
+                            2 * sizeof(int);  // work_done
 
-    void *base_ptr = memory_manager->malloc(bytes_to_allocate);
+    // void *base_ptr = memory_manager->malloc(bytes_to_allocate);
+    void *base_ptr = deviceMemMalloc(memory_manager, bytes_to_allocate);
     memset(base_ptr, 0, bytes_to_allocate);
 
     void *ptr = base_ptr;
@@ -121,8 +125,7 @@ __global__ void copy(
     }
 }
 
-template <typename MemoryManagerType>
-__device__ ProjectionMemory allocateProjectionMemory(MemoryManagerType *memory_manager,const WorkItem *work_item) {
+__device__ ProjectionMemory allocateProjectionMemory(CudaMemoryManager *memory_manager,const WorkItem *work_item) {
     ProjectionMemory pm;
     pm.bytes_to_alloc =
           (work_item->pattern[0] + 2) * sizeof(int)         +  // pattern
@@ -136,7 +139,8 @@ __device__ ProjectionMemory allocateProjectionMemory(MemoryManagerType *memory_m
           1 * sizeof(int);                                     // work_done
 
     // pm.base_ptr = malloc(pm.bytes_to_alloc);
-    pm.base_ptr = memory_manager->malloc(pm.bytes_to_alloc);
+    // pm.base_ptr = memory_manager->malloc(pm.bytes_to_alloc);
+    pm.base_ptr = deviceMemMalloc(memory_manager, pm.bytes_to_alloc);
     if (!pm.base_ptr) {
         pm.bytes_to_alloc = 0;
         pm.base_ptr = nullptr;
@@ -236,13 +240,13 @@ __device__ void storeHighUtilityPattern(const ProjectionMemory *pm, int pattern_
     }
 }
 
-template <typename MemoryManagerType>
-__device__ void checkAndFreeWorkItem(MemoryManagerType *memory_manager,WorkItem *work_item) {
+__device__ void checkAndFreeWorkItem(CudaMemoryManager *memory_manager,WorkItem *work_item) {
     // int ret = work_item->work_done[0]++;
     int ret = atomicAdd(&work_item->work_done[0], 1);
     if (ret == work_item->work_count - 1) {
         // free(work_item->base_ptr);
-        memory_manager->free(work_item->base_ptr);
+        // memory_manager->free(work_item->base_ptr);
+        deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes);
     }
 }
 
@@ -395,8 +399,7 @@ __device__ void pushNewWorkItems(AtomicWorkStack *q, const WorkItem *old_work_it
 }
 
 
-template <typename MemoryManagerType>
-__global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_queue, int min_util, int *high_utility_patterns)
+__global__ void mine(CudaMemoryManager *memory_manager, AtomicWorkStack *work_queue, int min_util, int *high_utility_patterns)
 {
     WorkItem work_item;
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -404,13 +407,13 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
     while (stack_get_work_count(work_queue) > 0)
     {
         if (!stack_pop(work_queue, &work_item)) continue; // queue is momentarily empty
-        // printf("Work Count: %d\n", stack_get_work_count(work_queue));
+        // printf("%d|Work Count: %d\n", tid, stack_get_work_count(work_queue));
 
         // 1. Allocate memory for projection.
         ProjectionMemory pm = allocateProjectionMemory(memory_manager, &work_item);
         if (pm.base_ptr == nullptr) {
             atomicSub(&work_queue->active, 1);
-            __threadfence();
+            __threadfence_system();
 
             // // push the work item back to the queue
             // while (!stack_push(work_queue, work_item)) {}
@@ -435,7 +438,8 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
         // If no valid transactions were found, free and update work_done.
         if (proj.transaction_counter == 0) {
             // printf("No valid transactions found\n");
-            memory_manager->free(pm.base_ptr);
+            // memory_manager->free(pm.base_ptr);
+            deviceMemFree(memory_manager, pm.base_ptr, pm.bytes_to_alloc);
             checkAndFreeWorkItem(memory_manager, &work_item);
             continue;
         }
@@ -453,7 +457,8 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
             pushNewWorkItems(work_queue, &work_item, &pm, mergeRes.new_item_counter,
                              mergeRes.new_transaction_counter, subtree_util_counter, min_util);
         } else {
-            memory_manager->free(pm.base_ptr);
+            // memory_manager->free(pm.base_ptr);
+            deviceMemFree(memory_manager, pm.base_ptr, pm.bytes_to_alloc);
         }
 
         // // 8. Update work_done and free memory if all work is done.
@@ -461,8 +466,9 @@ __global__ void mine(MemoryManagerType *memory_manager, AtomicWorkStack *work_qu
 
         // printf("\n");
         atomicSub(&work_queue->active, 1);
-        __threadfence();
+        __threadfence_system();
     }
+    printf("Thread %d finished\n", tid);
 }
 
 int main(int argc, char *argv[])
@@ -507,33 +513,33 @@ int main(int argc, char *argv[])
     size_t num_items = items.size();
     size_t num_transactions = start.size();
 
-    HANDLE_ERROR(cudaMalloc(&d_items, num_items * sizeof(Item)));
-    HANDLE_ERROR(cudaMalloc(&d_start, num_transactions * sizeof(int)));
-    HANDLE_ERROR(cudaMalloc(&d_end, num_transactions * sizeof(int)));
-    HANDLE_ERROR(cudaMalloc(&d_primary, primary.size() * sizeof(int)));
+    cudaMalloc(&d_items, num_items * sizeof(Item));
+    cudaMalloc(&d_start, num_transactions * sizeof(int));
+    cudaMalloc(&d_end, num_transactions * sizeof(int));
+    cudaMalloc(&d_primary, primary.size() * sizeof(int));
 
-    HANDLE_ERROR(cudaMemcpy(d_items, items.data(), num_items * sizeof(Item), cudaMemcpyHostToDevice));
-    HANDLE_ERROR(cudaMemcpy(d_start, start.data(), num_transactions * sizeof(int), cudaMemcpyHostToDevice));
-    HANDLE_ERROR(cudaMemcpy(d_end, end.data(), num_transactions * sizeof(int), cudaMemcpyHostToDevice));
-    HANDLE_ERROR(cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice));
+    cudaMemcpy(d_items, items.data(), num_items * sizeof(Item), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_start, start.data(), num_transactions * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_end, end.data(), num_transactions * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
     int32_t *d_high_utility_patterns;
     cudaMallocManaged(&d_high_utility_patterns, 1024ULL * 1024ULL * 1024ULL); // 1GB
     d_high_utility_patterns[1] = 2;
 
-    using MemoryManagerType = OuroVAPQ;
-    MemoryManagerType mm;
-    mm.initialize(0, 1024 * 1024 * 1024);
-    // memory_manager.initialize();
+    // memory
+    std::cout << "Allocating Memory: " << page_count * page_size << " bytes\t(MB: " << (page_count * page_size) / (MEGA) << ")\n";
+
+    CudaMemoryManager *memory_manager = createMemoryManager(page_count, page_size);
 
     // start work queue
     // AtomicWorkQueue<WorkItem, work_queue_size> *work_queue;
     AtomicWorkStack *work_queue;
     cudaMalloc(&work_queue, sizeof(AtomicWorkStack));
 
-    copy<<<1, 1>>>(mm.getDeviceMemoryManager(), work_queue, d_items, d_start, d_end, d_primary, primary.size(), num_transactions, max_item);
+    copy<<<1, 1>>>(memory_manager, work_queue, d_items, d_start, d_end, d_primary, primary.size(), num_transactions, max_item);
     // Synchronize to ensure kernel completion
-    HANDLE_ERROR(cudaDeviceSynchronize());
+    cudaDeviceSynchronize();
 
     // free the memory
     cudaFree(d_items);
@@ -541,8 +547,17 @@ int main(int argc, char *argv[])
     cudaFree(d_end);
     cudaFree(d_primary);
 
-    mine<<<2, 1>>>(mm.getDeviceMemoryManager(), work_queue, args.utility, d_high_utility_patterns);
-    HANDLE_ERROR(cudaDeviceSynchronize());
+    mine<<<blocks, 1>>>(memory_manager, work_queue, args.utility, d_high_utility_patterns);
+    cudaDeviceSynchronize();
+
+
+
+
+
+
+
+
+
 
     std::cout << "High Utility Patterns: " << d_high_utility_patterns[0] << "\n";
 

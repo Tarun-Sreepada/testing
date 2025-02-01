@@ -64,32 +64,15 @@ CMAKE_BINARY_DIR = /home/tarun/testing/build
 
 # The main recursive "all" target.
 all: CMakeFiles/cuEFIM.dir/all
-all: external/Ouroboros/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
-preinstall: external/Ouroboros/preinstall
+preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
 clean: CMakeFiles/cuEFIM.dir/clean
-clean: external/Ouroboros/clean
 .PHONY : clean
-
-#=============================================================================
-# Directory level rules for directory external/Ouroboros
-
-# Recursive "all" directory target.
-external/Ouroboros/all:
-.PHONY : external/Ouroboros/all
-
-# Recursive "preinstall" directory target.
-external/Ouroboros/preinstall:
-.PHONY : external/Ouroboros/preinstall
-
-# Recursive "clean" directory target.
-external/Ouroboros/clean:
-.PHONY : external/Ouroboros/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/cuEFIM.dir
