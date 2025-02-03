@@ -6,56 +6,20 @@
 #include <string>
 #include <vector>
 #include <thread>
-#include "args.h"   // Include the args parser
-#include "parser.h" // Include the file reader
-#include "work.cuh" // Include the work queue
+#include "args.h"     // Include the args parser
+#include "parser.h"   // Include the file reader
+#include "work.cuh"   // Include the work queue
 #include "memory.cuh" // Include the memory manager
 
 #define KILO 1024ULL
-#define MEGA KILO * KILO
-#define GIGA KILO * MEGA
+#define MEGA KILO *KILO
+#define GIGA KILO *MEGA
 
 #define scale 2
 #define page_size 512
 #define total_memory 6 * GIGA
 
-#define blocks 32
-
-// Binary Search Utility
-__device__ int binarySearchItems(const Item *items, int n, uint32_t search_id, int offset, int length)
-{
-    if (offset < 0 || offset >= n || length <= 0 || (offset + length) > n)
-        return -1;
-    int l = offset, r = offset + length - 1;
-    while (l <= r)
-    {
-        int mid = l + (r - l) / 2;
-        if (items[mid].key == search_id)
-            return mid;
-        items[mid].key < search_id ? l = mid + 1 : r = mid - 1;
-    }
-    return -1;
-}
-
-__device__ uint32_t pcg_hash(uint32_t input)
-{
-    uint32_t state = input * 747796405u + 2891336453u;
-    uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-__device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
-{
-    return pcg_hash(key) % tableSize;
-}
-
-__device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
-{
-    uint32_t hash = 0;
-    for (int i = 0; i < n; i++)
-        hash ^= pcg_hash(items[i].key);
-    return hash % tableSize;
-}
+#define blocks 1
 
 __global__ void copy(
     CudaMemoryManager *memory_manager,
@@ -73,414 +37,357 @@ __global__ void copy(
 
     int item_count = end[num_transactions - 1] - start[0];
 
-    int bytes_to_allocate = 4 * sizeof(int) +                // pattern
-                            item_count * sizeof(Item) +      // items
-                            num_transactions * sizeof(int) + // start
-                            num_transactions * sizeof(int) + // end
-                            num_transactions * sizeof(int) +   // utility
-                            2 * sizeof(int);  // work_done
+    int bytes_to_allocate = 2 * sizeof(int) +                        // pattern
+                            sizeof(Database) +                       // db
+                            item_count * sizeof(Item) +              // items
+                            num_transactions * sizeof(Transaction) + // start, end, utility
+                            sizeof(int);                             // work done
 
-    // void *base_ptr = memory_manager->malloc(bytes_to_allocate);
     void *base_ptr = deviceMemMalloc(memory_manager, bytes_to_allocate);
     memset(base_ptr, 0, bytes_to_allocate);
 
-    void *ptr = base_ptr;
-    int *pattern = reinterpret_cast<int *>(ptr);
-    ptr += 4 * sizeof(int);
-    Item *n_items = reinterpret_cast<Item *>(ptr);
-    ptr += item_count * sizeof(Item);
-    int *n_start = reinterpret_cast<int *>(ptr);
-    ptr += num_transactions * sizeof(int);
-    int *n_end = reinterpret_cast<int *>(ptr);
-    ptr += num_transactions * sizeof(int);
-    int *n_utility = reinterpret_cast<int *>(ptr);
-    ptr += num_transactions * sizeof(int);
-    int *work_done = reinterpret_cast<int *>(ptr);
-    ptr += sizeof(int);
+    WorkItem work_item;
+    work_item.base_ptr = base_ptr;
+    work_item.bytes_to_alloc = bytes_to_allocate;
 
-    pattern[0] = 0;
-    work_done[0] = 0;
-    memcpy(n_start, start, num_transactions * sizeof(int));
-    memcpy(n_end, end, num_transactions * sizeof(int));
-    memcpy(n_items, items, item_count * sizeof(Item));
+    // pattern
+    work_item.pattern = reinterpret_cast<int *>(base_ptr);
+    base_ptr += 2 * sizeof(int);
 
+    // db
+    work_item.db = reinterpret_cast<Database *>(base_ptr);
+    base_ptr += sizeof(Database);
+
+    // items
+    work_item.db->d_data = reinterpret_cast<Item *>(base_ptr);
+    memcpy(work_item.db->d_data, items, item_count * sizeof(Item));
+    work_item.db->numItems = item_count;
+    base_ptr += item_count * sizeof(Item);
+
+    // transactions
+    work_item.db->d_transactions = reinterpret_cast<Transaction *>(base_ptr);
+    work_item.db->numTransactions = num_transactions;
+    for (int i = 0; i < num_transactions; i++)
+    {
+        work_item.db->d_transactions[i].data = work_item.db->d_data;
+        work_item.db->d_transactions[i].start = start[i];
+        work_item.db->d_transactions[i].end = end[i];
+    }
+    base_ptr += num_transactions * sizeof(Transaction);
+
+    // counts
+    work_item.db->numItems = item_count;
+    work_item.db->numTransactions = num_transactions;
+
+    // work_item.primaries = reinterpret_cast<int *>(base_ptr);
+    // memcpy(work_item.primaries, primary, num_primary * sizeof(int));
+
+    work_item.work_done = reinterpret_cast<int *>(base_ptr);
+    work_item.work_count = num_primary;
+    work_item.max_item = max_item;
+
+    // stack_push(work_queue, work_item);
     for (int i = 0; i < num_primary; i++)
     {
-        WorkItem work_item;
-        work_item.pattern = pattern;
-        work_item.items = n_items;
-        work_item.num_items = item_count;
-        work_item.start = n_start;
-        work_item.end = n_end;
-        work_item.utility = n_utility;
-        work_item.num_transactions = num_transactions;
-        work_item.primary_item = primary[i];
-        work_item.max_item = max_item;
-        work_item.work_done = work_done;
-        work_item.work_count = num_primary;
-        work_item.bytes = bytes_to_allocate;
-        work_item.base_ptr = base_ptr;
+        work_item.primary = primary[i];
 
         stack_push(work_queue, work_item);
     }
-    atomicAdd(&work_queue->active, num_primary);
 }
 
-__device__ ProjectionMemory allocateProjectionMemory(CudaMemoryManager *memory_manager,const WorkItem *work_item) {
-    ProjectionMemory pm;
-    pm.bytes_to_alloc =
-          (work_item->pattern[0] + 2) * sizeof(int)         +  // pattern
-          work_item->num_items * sizeof(Item)               +  // items
-          work_item->num_transactions * sizeof(int)         +  // start array
-          work_item->num_transactions * sizeof(int)         +  // end array
-          work_item->num_transactions * sizeof(int)         +  // utility per transaction
-          work_item->num_transactions * sizeof(Item) * scale +  // tran_hash (hash table)
-          work_item->max_item * sizeof(Item) * scale         +  // local_util
-          work_item->max_item * sizeof(Item) * scale         +  // subtree_util
-          1 * sizeof(int);                                     // work_done
-
-    // pm.base_ptr = malloc(pm.bytes_to_alloc);
-    // pm.base_ptr = memory_manager->malloc(pm.bytes_to_alloc);
-    pm.base_ptr = deviceMemMalloc(memory_manager, pm.bytes_to_alloc);
-    if (!pm.base_ptr) {
-        pm.bytes_to_alloc = 0;
-        pm.base_ptr = nullptr;
-        return pm;
-    }
-    memset(pm.base_ptr, 0, pm.bytes_to_alloc);
-
-    // Set up pointer offsets
-    pm.n_pattern   = (int *)pm.base_ptr;
-    pm.n_items     = (Item *)(pm.n_pattern + work_item->pattern[0] + 2);
-    pm.n_start     = (int *)(pm.n_items + work_item->num_items);
-    pm.n_end       = (int *)(pm.n_start + work_item->num_transactions);
-    pm.n_utility   = (int *)(pm.n_end + work_item->num_transactions);
-    pm.tran_hash   = (Item *)(pm.n_utility + work_item->num_transactions);
-    pm.local_util  = (Item *)(pm.tran_hash + work_item->num_transactions * scale);
-    pm.subtree_util= (Item *)(pm.local_util + work_item->max_item * scale);
-    pm.work_done   = (int *)(pm.subtree_util + work_item->max_item * scale);
-
-    return pm;
-}
-
-__device__ void copyAndExtendPattern(const WorkItem *work_item, ProjectionMemory *pm) {
-    // Copy the current pattern (first n integers) and then extend it
-    memcpy(pm->n_pattern, work_item->pattern, (work_item->pattern[0] + 1) * sizeof(int));
-    pm->n_pattern[0] += 1;
-    pm->n_pattern[pm->n_pattern[0]] = work_item->primary_item;
-}
-
-
-
-__device__ ProjectionResult performProjection(const WorkItem *work_item, ProjectionMemory *pm) {
-    ProjectionResult res = {0, 0, 0};
-    int item_counter = 0;
-    int transaction_counter = 0;
-    int pattern_utility = 0;
-
-    for (int i = 0; i < work_item->num_transactions; i++) {
-        // Find the index for the primary item in this transaction.
-        int idx = binarySearchItems(work_item->items, work_item->num_items,
-                                    work_item->primary_item, work_item->start[i],
-                                    work_item->end[i] - work_item->start[i]);
-        if (idx == -1)
-            continue;
-
-        // Record the starting index for the new transaction
-        pm->n_start[transaction_counter] = item_counter;
-        // Combine the current transaction utility with the utility at idx.
-        pm->n_utility[transaction_counter] = work_item->utility[i] + work_item->items[idx].util;
-        pattern_utility += pm->n_utility[transaction_counter];
-        int temp_util = pm->n_utility[transaction_counter];
-
-        // Copy the remaining items of the transaction
-        for (int j = idx + 1; j < work_item->end[i]; j++) {
-            pm->n_items[item_counter] = work_item->items[j];
-            temp_util += work_item->items[j].util;
-            item_counter++;
-        }
-        pm->n_end[transaction_counter] = item_counter;
-        transaction_counter++;
-
-        // Update local utility table for all items in this transaction.
-        for (int j = idx + 1; j < work_item->end[i]; j++) {
-            uint32_t hash = hashFunction(work_item->items[j].key, work_item->max_item);
-            while (true) {
-                if (pm->local_util[hash].key == 0 ||
-                    pm->local_util[hash].key == work_item->items[j].key)
-                {
-                    pm->local_util[hash].key = work_item->items[j].key;
-                    pm->local_util[hash].util += temp_util;
-                    break;
-                }
-                hash = (hash + 1) % (work_item->max_item * scale);
-            }
-        }
-    }
-    res.item_counter = item_counter;
-    res.transaction_counter = transaction_counter;
-    res.pattern_utility = pattern_utility;
-    return res;
-}
-
-
-__device__ void storeHighUtilityPattern(const ProjectionMemory *pm, int pattern_utility,
-                             int *high_utility_patterns, int min_util) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-    if (pattern_utility >= min_util) {
-        // Update the count of high utility patterns.
-        // high_utility_patterns[0]++;  
-        atomicAdd(&high_utility_patterns[0], 1);
-        printf("%d|High Utility Patterns: %d\n", tid, high_utility_patterns[0]);
-        // Compute an offset to store the new pattern.
-        // int offset = (high_utility_patterns[1] += pm->n_pattern[0] + 2);
-        int offset = atomicAdd(&high_utility_patterns[1], pm->n_pattern[0] + 2);
-        for (int i = 0; i < pm->n_pattern[0]; i++) {
-            high_utility_patterns[offset + i] = pm->n_pattern[i + 1];
-        }
-        high_utility_patterns[offset + pm->n_pattern[0]] = pattern_utility;
-    }
-}
-
-__device__ void checkAndFreeWorkItem(CudaMemoryManager *memory_manager,WorkItem *work_item) {
-    // int ret = work_item->work_done[0]++;
-    int ret = atomicAdd(&work_item->work_done[0], 1);
-    if (ret == work_item->work_count - 1) {
-        // free(work_item->base_ptr);
-        // memory_manager->free(work_item->base_ptr);
-        deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes);
-    }
-}
-
-
-
-__device__ MergeResult trimMergeAndComputeSubtree(const WorkItem *work_item, ProjectionMemory *pm,
-                                         int proj_transaction_count, int min_util) {
-    MergeResult mres = {0, 0};
-    int new_item_counter = 0;
-    int new_transaction_counter = 0;
-    int mod_val = work_item->max_item * scale;
-
-    // Loop over all projected transactions.
-    for (int i = 0; i < proj_transaction_count; i++) {
-        int start = new_item_counter;
-        for (int j = pm->n_start[i]; j < pm->n_end[i]; j++) {
-            uint32_t hash = hashFunction(pm->n_items[j].key, mod_val);
-            while (true) {
-                if (pm->local_util[hash].key == pm->n_items[j].key) {
-                    if (pm->local_util[hash].util >= min_util) {
-                        pm->n_items[new_item_counter] = pm->n_items[j];
-                        new_item_counter++;
-                    }
-                    break;
-                }
-                hash = (hash + 1) % mod_val;
-            }
-        }
-        if (start == new_item_counter)
-            continue;
-
-        pm->n_start[new_transaction_counter] = start;
-        pm->n_end[new_transaction_counter]   = new_item_counter;
-        pm->n_utility[new_transaction_counter] = pm->n_utility[i];
-
-
-        // pre-compute the utility of the transaction for subtree utility
-        int temp_util = pm->n_utility[new_transaction_counter];
-        for (int j = pm->n_start[new_transaction_counter]; j < pm->n_end[new_transaction_counter]; j++) {
-            temp_util += pm->n_items[j].util;
-        }
-
-        // Update the subtree utility table for each item in the transaction.
-        int temp = 0;
-        for (int j = pm->n_start[new_transaction_counter]; j < pm->n_end[new_transaction_counter]; j++) {
-            uint32_t hash = hashFunction(pm->n_items[j].key, mod_val);
-            while (true) {
-                if (pm->subtree_util[hash].key == 0 ||
-                    pm->subtree_util[hash].key == pm->n_items[j].key)
-                {
-                    pm->subtree_util[hash].key = pm->n_items[j].key;
-                    pm->subtree_util[hash].util += temp_util - temp;
-                    temp = pm->n_items[j].util;
-                    break;
-                }
-                hash = (hash + 1) % mod_val;
-            }
-        }
-
-
-        // Merging block: merge duplicate transactions if possible.
-        int cur_tran_idx = new_transaction_counter;
-        int tran_length = pm->n_end[cur_tran_idx] - pm->n_start[cur_tran_idx];
-        int t_hash = items_hasher(pm->n_items + start, tran_length,
-                                  work_item->num_transactions * scale);
-        bool merged = false;
-        while (true) {
-            if (pm->tran_hash[t_hash].key == 0) {
-                pm->tran_hash[t_hash].key = t_hash;
-                pm->tran_hash[t_hash].util = cur_tran_idx;
-                break;
-            }
-            if (pm->tran_hash[t_hash].key == t_hash) {
-                int existing_idx = pm->tran_hash[t_hash].util;
-                int existing_length = pm->n_end[existing_idx] - pm->n_start[existing_idx];
-                if (existing_length == tran_length) {
-                    bool same = true;
-                    for (int j = 0; j < tran_length; j++) {
-                        if (pm->n_items[pm->n_start[existing_idx] + j].key !=
-                            pm->n_items[pm->n_start[cur_tran_idx] + j].key)
-                        {
-                            same = false;
-                            break;
-                        }
-                    }
-                    if (same) {
-                        pm->n_utility[existing_idx] += pm->n_utility[cur_tran_idx];
-                        for (int j = 0; j < tran_length; j++) {
-                            pm->n_items[pm->n_start[existing_idx] + j].util +=
-                                pm->n_items[pm->n_start[cur_tran_idx] + j].util;
-                        }
-                        new_item_counter -= tran_length;
-                        merged = true;
-                        break;
-                    }
-                }
-            }
-            t_hash = (t_hash + 1) % (work_item->num_transactions * scale);
-        }
-        if (!merged)
-            new_transaction_counter++;
-    }
-
-    mres.new_item_counter = new_item_counter;
-    mres.new_transaction_counter = new_transaction_counter;
-    return mres;
-}
-
-__device__ int countSubtreeUtility(const WorkItem *work_item, const ProjectionMemory *pm, int min_util) {
-    int counter = 0;
-    for (int i = 0; i < work_item->max_item * scale; i++) {
-        if (pm->subtree_util[i].util >= min_util)
-            counter++;
-    }
-    return counter;
-}
-
-__device__ void pushNewWorkItems(AtomicWorkStack *q, const WorkItem *old_work_item,
-                      ProjectionMemory *pm, int new_item_counter, int new_transaction_counter,
-                      int subtree_util_counter, int min_util) {
-    // Compute the number of items that meet the local utility threshold.
-    int local_util_counter = 0;
-    for (int i = 0; i < old_work_item->max_item * scale; i++) {
-        if (pm->local_util[i].util >= min_util)
-            local_util_counter++;
-    }
-
-
-    for (int i = 0; i < old_work_item->max_item * scale; i++) {
-        if (pm->subtree_util[i].util < min_util)
-            continue;
-
-        WorkItem new_work_item;
-        new_work_item.pattern         = pm->n_pattern;
-        new_work_item.items           = pm->n_items;
-        new_work_item.num_items       = new_item_counter;
-        new_work_item.start           = pm->n_start;
-        new_work_item.end             = pm->n_end;
-        new_work_item.utility         = pm->n_utility;
-        new_work_item.num_transactions= new_transaction_counter;
-        new_work_item.primary_item    = pm->subtree_util[i].key;
-        new_work_item.max_item        = local_util_counter;
-        new_work_item.work_done       = pm->work_done;
-        new_work_item.work_count      = subtree_util_counter;
-        new_work_item.bytes           = pm->bytes_to_alloc;
-        new_work_item.base_ptr        = pm->base_ptr;
-
-        // stack_push(q, new_work_item);
-        while (!stack_push(q, new_work_item)) {}
-    }
-    atomicAdd(&q->active, subtree_util_counter);
-}
-
-
-__global__ void mine(CudaMemoryManager *memory_manager, AtomicWorkStack *work_queue, int min_util, int *high_utility_patterns)
+__device__ void printDB(Database *db)
 {
-    WorkItem work_item;
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-    while (work_queue->active)
+    printf("DB: \n");
+    for (int i = 0; i < db->numTransactions; i++)
     {
-        
-        if (!stack_pop(work_queue, &work_item)) 
+        printf("%d|", db->d_transactions[i].utility);
+        for (int j = 0; j < db->d_transactions[i].length(); j++)
         {
-            // __nanosleep(100);
-            // __threadfence_system();
-            continue; // queue is momentarily empty
+            printf("%d:%d ", db->d_transactions[i].get()[j].key, db->d_transactions[i].get()[j].util);
         }
+        printf("\n");
+    }
+    // printf("\n\n");
+}
 
-        // 1. Allocate memory for projection.
-        ProjectionMemory pm = allocateProjectionMemory(memory_manager, &work_item);
-        if (pm.base_ptr == nullptr) {
+__device__ uint32_t pcg_hash(uint32_t input)
+{
+    uint32_t state = input * 747796405u + 2891336453u;
+    uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+__device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
+{
+    return pcg_hash(key) % tableSize;
+}
+
+// __device__ void add_local_util(local_util, old->max_item * scale, old->db->d_data[i].key, total_util);
+__device__ void add_bucket_util(Item *local_util, int max_item, int key, int total_util)
+{
+    // hash the key
+    int idx = hashFunction(key, max_item * scale);
+
+    // find the key
+    while (true)
+    {
+        // we are adding in atomic so do compare and swap for the key
+        int old = atomicCAS(&local_util[idx].key, 0, key);
+        if (old == key)
+        {
+            // if the key is already present, add the utility
+            atomicAdd(&local_util[idx].util, total_util);
+            return;
+        }
+        else if (old == 0)
+        {
+            // if the key is not present, add the key and utility
+            atomicExch(&local_util[idx].key, key);
+            atomicAdd(&local_util[idx].util, total_util);
+            return;
+        }
+        // if the key is not present, find the next slot
+        idx = (idx + 1) % (max_item * scale);
+    }
+
+
+}
+
+
+__global__ void project(WorkItem *old, WorkItem *curr, Item *local_util)
+{
+
+    int tid = blockIdx.x;
+
+    if (tid >= old->db->numTransactions) return;
+
+    // find the item in old
+    int item = curr->pattern[curr->pattern[0]];
+    int idx = old->db->d_transactions[tid].findItem(item);
+    if (idx == -1)
+    {
+        atomicAdd(&curr->db->transaction_tracker, 1);
+
+        return;
+    }
+
+    int items_this_trans = old->db->d_transactions[tid].end - (idx + 1);
+    int ret = atomicAdd(&curr->db->numItems, items_this_trans);
+    int tran_ret = atomicAdd(&curr->db->numTransactions, 1);
+
+    curr->db->d_transactions[tran_ret].utility = old->db->d_transactions[tid].utility + old->db->d_data[idx].util;
+    curr->db->d_transactions[tran_ret].data = curr->db->d_data;
+
+    // write.
+
+    // update the db
+    curr->db->d_transactions[tran_ret].start = ret;
+
+    int total_util = curr->db->d_transactions[tran_ret].utility;
+    for (int i = idx+1; i < old->db->d_transactions[tid].end; i++)
+    {
+        total_util += old->db->d_data[i].util;
+    }
+    // curr->db->d_transactions[tran_ret].end = ret + items_this_trans;
+
+    // printf("Transaction: %d\tUtility: %d\tStart: %d\tEnd: %d\tItems: %d\n", tran_ret, curr->db->d_transactions[tran_ret].utility, curr->db->d_transactions[tran_ret].start, curr->db->d_transactions[tran_ret].end, items_this_trans);
+    // memcpy(curr->db->d_data + ret, old->db->d_data + idx+1, items_this_trans * sizeof(Item));
+    // curr->db->d_transactions[tran_ret].end = ret + items_this_trans;
+
+    for (int i = idx+1; i < old->db->d_transactions[tid].end; i++)
+    {
+    //     ret++;
+        curr->db->d_data[ret++] = old->db->d_data[i];
+        add_bucket_util(local_util, old->max_item * scale, old->db->d_data[i].key, total_util);
+    }
+    curr->db->d_transactions[tran_ret].end = ret;
+
+    atomicAdd(&curr->db->transaction_tracker, 1);
+}
+
+__device__ void printBucketUtil(Item *local_util, int max_item)
+{
+    printf("Bucket Util: \t");
+    for (int i = 0; i < max_item; i++)
+    {
+        if (local_util[i].key != 0)
+        {
+            printf("%d:%d ", local_util[i].key, local_util[i].util);
+        }
+    }
+    printf("\n");
+}
+
+__global__ void verify(CudaMemoryManager *memory_manager, AtomicWorkStack *work_queue)
+{
+    // WorkItem work_item;
+    WorkItem *work_item = reinterpret_cast<WorkItem *>(deviceMemMalloc(memory_manager, sizeof(WorkItem)));
+    printf("Work Count: %d\n", stack_get_work_count(work_queue));
+
+    while (stack_get_work_count(work_queue) > 0)
+    {
+        stack_pop(work_queue, work_item);
+
+        printf("Pattern: ");
+        for (int i = 0; i < work_item->pattern[0]; i++)
+        {
+            printf("%d ", work_item->pattern[i + 1]);
+        }
+        printf("(%d)\n", work_item->primary);
+
+        // printf("Work Done: %d\n", work_item->work_done[0]);
+        // printf("Work Count: %d\n", work_item->work_count);
+        // printf("Bytes: %d\n", work_item->bytes_to_alloc);
+        printDB(work_item->db);
+
+
+        // WorkItem new_work_item;
+        WorkItem *new_work_item = reinterpret_cast<WorkItem *>(deviceMemMalloc(memory_manager, sizeof(WorkItem)));
+
+
+        int bytes_to_allocate = sizeof(int) * (work_item->pattern[0] + 2) +            // pattern
+                                sizeof(Database) +                                     // db
+                                work_item->db->numItems * sizeof(Item) +               // items
+                                work_item->db->numTransactions * sizeof(Transaction) + // start, end, utility
+                                sizeof(int);                                           // work done
+
+        // allocate memory
+        void *base_ptr = deviceMemMalloc(memory_manager, bytes_to_allocate);
+        memset(base_ptr, 0, bytes_to_allocate);
+
+        // meta data
+        new_work_item->base_ptr = base_ptr;
+        new_work_item->bytes_to_alloc = bytes_to_allocate;
+
+        // pattern
+        new_work_item->pattern = reinterpret_cast<int *>(base_ptr);
+        memcpy(new_work_item->pattern, work_item->pattern, (work_item->pattern[0]) * sizeof(int));
+        new_work_item->pattern[++new_work_item->pattern[0]] = work_item->primary;
+        base_ptr += (work_item->pattern[0] + 2) * sizeof(int);
+
+        // db
+        new_work_item->db = reinterpret_cast<Database *>(base_ptr);
+        // // memcpy(new_work_item->db, work_item->db, sizeof(Database));
+        // /*
+        //     we will be using data to update stuff
+        // */
+        base_ptr += sizeof(Database);
+
+
+        new_work_item->db->d_data = reinterpret_cast<Item *>(base_ptr);
+        // // memcpy(new_work_item->db->d_data, work_item->db->d_data, work_item->db->numItems * sizeof(Item));
+        // /*
+        //     we will be using data to update stuff
+        // */
+        base_ptr += work_item->db->numItems * sizeof(Item);
+
+        new_work_item->db->d_transactions = reinterpret_cast<Transaction *>(base_ptr);
+        // // memcpy(new_work_item->db->d_transactions, work_item->db->d_transactions, work_item->db->numTransactions * sizeof(Transaction));
+        // /*
+        //     we will be using data to update stuff
+        // */
+        base_ptr += work_item->db->numTransactions * sizeof(Transaction);
+
+
+        // new_work_item->work_done = reinterpret_cast<int *>(base_ptr);
+
+        Item *local_util = reinterpret_cast<Item *>(deviceMemMalloc(memory_manager, work_item->max_item * scale * sizeof(Item)));
+
+
+        project<<<work_item->db->numTransactions, 1>>>(work_item, new_work_item, local_util);
+
+        while (new_work_item->db->transaction_tracker != work_item->db->numTransactions)
+        {
+        //     // merge<<<1,1>>>(work_item, new_work_item);
+            // printf("%d / %d\n", new_work_item->db->transaction_tracker, work_item->db->numTransactions);
+            __threadfence();
+        }
+        printf("Number of Transactions: %d\n", new_work_item->db->numTransactions);
+        printf("Number of Items: %d\n", new_work_item->db->numItems);
+
+        printDB(new_work_item->db);
+        printBucketUtil(local_util, work_item->max_item * scale);
+
+        if (new_work_item->db->numTransactions == 0)
+        {
+            deviceMemFree(memory_manager, new_work_item->base_ptr, new_work_item->bytes_to_alloc);
+            deviceMemFree(memory_manager, local_util, work_item->max_item * scale * sizeof(Item));
             atomicSub(&work_queue->active, 1);
-            // work_queue->active--;
-            // __threadfence_system();
+            int ret = atomicAdd(&work_item->work_done[0], 1);
+            if (ret == work_item->work_count - 1)
+            {
+                deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes_to_alloc);
+            } 
 
-            // push the work item back to the queue
-            while (!stack_push(work_queue, work_item)) {}
-            atomicAdd(&work_queue->active, 1);
-
-
-            printf("Failed to allocate memory for projection\n");
             continue;
         }
 
-
-        // 2. Copy and extend the pattern.
-        copyAndExtendPattern(&work_item, &pm);
-
-        // 3. Perform projection.
-        // printf("%d:Performing Projection\n", tid);
-        ProjectionResult proj = performProjection(&work_item, &pm);
-
-        // 4. Store high utility pattern if threshold met.
-        storeHighUtilityPattern(&pm, proj.pattern_utility, high_utility_patterns, min_util);
-
-
-        // If no valid transactions were found, free and update work_done.
-        if (proj.transaction_counter == 0) {
-            // printf("No valid transactions found\n");
-            // memory_manager->free(pm.base_ptr);
-            deviceMemFree(memory_manager, pm.base_ptr, pm.bytes_to_alloc);
-            checkAndFreeWorkItem(memory_manager, &work_item);
-            continue;
-        }
-
-
-        // printf("%d:Trimming and Merging\n", tid);
-        MergeResult mergeRes = trimMergeAndComputeSubtree(&work_item, &pm,
-                                                          proj.transaction_counter, min_util);
-
-        int subtree_util_counter = countSubtreeUtility(&work_item, &pm, min_util);
-
-
-        // 7. Create and push new work items if there is any valid subtree.
-        if (subtree_util_counter) {
-            pushNewWorkItems(work_queue, &work_item, &pm, mergeRes.new_item_counter,
-                             mergeRes.new_transaction_counter, subtree_util_counter, min_util);
-        } else {
-            // memory_manager->free(pm.base_ptr);
-            deviceMemFree(memory_manager, pm.base_ptr, pm.bytes_to_alloc);
-        }
-
-        // // 8. Update work_done and free memory if all work is done.
-        checkAndFreeWorkItem(memory_manager, &work_item);
+        // // print local util
+        // for (int i = 0; i < work_item->max_item * scale; i++)
+        // {
+        //     if (local_util[i].key != 0)
+        //     {
+        //         printf("Key: %d\tUtil: %d\n", local_util[i].key, local_util[i].util);
+        //     }
+        // }
+  
+        // // print new work item
+        // printf("Pattern: (len:%d) | ", new_work_item.pattern[0]);
+        // for (int i = 0; i < new_work_item.pattern[0]; i++)
+        // {
+        //     printf("%d ", new_work_item.pattern[i + 1]);
+        // }
 
         // printf("\n");
+
+        // printf("Primary: %d\n", new_work_item.primary);
+        // printf("Work Done: %d\n", new_work_item.work_done[0]);
+        // printf("Work Count: %d|", new_work_item.work_count);
+        // printf("Bytes: %d\n", new_work_item.bytes_to_alloc);
+        // printf("DB: \n");
+        // for (int i = 0; i < new_work_item.db->numTransactions; i++)
+        // {
+        //     printf("%d|", new_work_item.db->d_transactions[i].utility);
+        //     for (int j = 0; j < new_work_item.db->d_transactions[i].length(); j++)
+        //     {
+        //         printf("%d:%d ", new_work_item.db->d_transactions[i].get()[j].key, new_work_item.db->d_transactions[i].get()[j].util);
+        //     }
+        //     printf("\n");
+        // }
+        // printf("\n");
+
+        // new_work_item.db = reinterpret_cast<Database *>(base_ptr);
+        // memcpy(new_work_item.db, work_item.db, sizeof(Database));
+
+        // // Local Util, Subtree Util
+        // int bytes_for_util = 2 * work_item->max_item * scale * sizeof(Item);
+        // void *n_base_ptr = deviceMemMalloc(memory_manager, bytes_for_util);
+
+        // Item *local_util = reinterpret_cast<Item *>(n_base_ptr);
+        // n_base_ptr += bytes_for_util;
+
+        // Item *subtree_util = reinterpret_cast<Item *>(n_base_ptr);
+        // n_base_ptr += bytes_for_util;
+
+        // // Tran Hash
+        // Item *tran_hash = reinterpret_cast<Item *>(deviceMemMalloc(memory_manager, work_item->db->numTransactions * sizeof(Item) * scale));
+
         atomicSub(&work_queue->active, 1);
-        // __threadfence_system();
+        int ret = atomicAdd(&work_item->work_done[0], 1);
+        if (ret == work_item->work_count - 1)
+        {
+            deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes_to_alloc);
+        }
+        printf("\n");
+        printf("Work Count: %d\n", stack_get_work_count(work_queue));
     }
-    // printf("Thread %d finished\n", tid);
+}
+
+__global__ void mine(CudaMemoryManager *memory_manager, AtomicWorkStack *work_queue, int utility, int32_t *high_utility_patterns)
+{
+    WorkItem work_item;
+
+    // while
 }
 
 int main(int argc, char *argv[])
@@ -492,6 +399,9 @@ int main(int argc, char *argv[])
         // Parsing failed; exit the program
         return EXIT_FAILURE;
     }
+
+    // increase cuad stack size
+    // cudaDeviceSetLimit(cudaLimitStackSize, 32 * 1024);
 
     ReadFileResult fileResult = read_file(args.filename, args.separator, args.utility);
 
@@ -511,8 +421,10 @@ int main(int argc, char *argv[])
         start.push_back(items.size());
         for (int i = 0; i < key.size(); i++)
         {
+            std::cout << key[i] << ":" << val[i] << " ";
             items.push_back({key[i], val[i]});
         }
+        std::cout << "\n";
         end.push_back(items.size());
     }
 
@@ -545,31 +457,26 @@ int main(int argc, char *argv[])
     CudaMemoryManager *memory_manager = createMemoryManager(total_memory, page_size);
 
     // start work queue
-    // AtomicWorkQueue<WorkItem, work_queue_size> *work_queue;
     AtomicWorkStack *work_queue;
     cudaMalloc(&work_queue, sizeof(AtomicWorkStack));
 
     copy<<<1, 1>>>(memory_manager, work_queue, d_items, d_start, d_end, d_primary, primary.size(), num_transactions, max_item);
     // Synchronize to ensure kernel completion
     cudaDeviceSynchronize();
+        std::cout << "\n";
+        std::cout << "\n";
 
-    // free the memory
-    cudaFree(d_items);
-    cudaFree(d_start);
-    cudaFree(d_end);
-    cudaFree(d_primary);
 
-    mine<<<blocks, 1>>>(memory_manager, work_queue, args.utility, d_high_utility_patterns);
+    verify<<<1, 1>>>(memory_manager, work_queue);
+
+    // // free the memory
+    // cudaFree(d_items);
+    // cudaFree(d_start);
+    // cudaFree(d_end);
+    // cudaFree(d_primary);
+
+    // mine<<<blocks, 1>>>(memory_manager, work_queue, args.utility, d_high_utility_patterns);
     cudaDeviceSynchronize();
-
-
-
-
-
-
-
-
-
 
     std::cout << "High Utility Patterns: " << d_high_utility_patterns[0] << "\n";
 

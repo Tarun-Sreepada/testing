@@ -4,6 +4,7 @@
 CMakeFiles/cuEFIM.dir/main.cu.o
  /home/tarun/testing/main.cu
  /home/tarun/testing/include/args.h
+ /home/tarun/testing/include/database.cuh
  /home/tarun/testing/include/memory.cuh
  /home/tarun/testing/include/parser.h
  /home/tarun/testing/include/work.cuh

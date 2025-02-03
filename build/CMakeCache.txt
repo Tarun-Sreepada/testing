@@ -225,48 +225,6 @@ CMAKE_TAPI:FILEPATH=CMAKE_TAPI-NOTFOUND
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
-//Build with compute capability 5.0 support
-CUDA_BUILD_CC50:BOOL=OFF
-
-//Build with compute capability 5.2 support
-CUDA_BUILD_CC52:BOOL=OFF
-
-//Build with compute capability 6.1 support
-CUDA_BUILD_CC61:BOOL=OFF
-
-//Build with compute capability 7.0 support - ASYNC
-CUDA_BUILD_CC70_ASYNC:BOOL=ON
-
-//Build with compute capability 7.0 support - SYNC
-CUDA_BUILD_CC70_SYNC:BOOL=OFF
-
-//Build with compute capability 7.5 support
-CUDA_BUILD_CC75:BOOL=OFF
-
-//Build with kernel debug
-CUDA_BUILD_DEBUG:BOOL=OFF
-
-//Build with kernel statistics and line numbers
-CUDA_BUILD_INFO:BOOL=ON
-
-//Test Chunk-Based Standard
-TEST_C:BOOL=ON
-
-//Test Page-Based Standard
-TEST_P:BOOL=ON
-
-//Test Chunk-Based VA
-TEST_VAC:BOOL=ON
-
-//Test Page-Based VA
-TEST_VAP:BOOL=ON
-
-//Test Chunk-Based VL
-TEST_VLC:BOOL=ON
-
-//Test Page-Based VL
-TEST_VLP:BOOL=ON
-
 //Value Computed by CMake
 cuEFIM_BINARY_DIR:STATIC=/home/tarun/testing/build
 
@@ -275,15 +233,6 @@ cuEFIM_IS_TOP_LEVEL:STATIC=ON
 
 //Value Computed by CMake
 cuEFIM_SOURCE_DIR:STATIC=/home/tarun/testing
-
-//Value Computed by CMake
-ouroboros_BINARY_DIR:STATIC=/home/tarun/testing/build/external/Ouroboros
-
-//Value Computed by CMake
-ouroboros_IS_TOP_LEVEL:STATIC=OFF
-
-//Value Computed by CMake
-ouroboros_SOURCE_DIR:STATIC=/home/tarun/testing/external/Ouroboros
 
 
 ########################

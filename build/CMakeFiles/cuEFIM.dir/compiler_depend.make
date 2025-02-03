@@ -3,6 +3,7 @@
 
 CMakeFiles/cuEFIM.dir/main.cu.o: /home/tarun/testing/main.cu \
   /home/tarun/testing/include/args.h \
+  /home/tarun/testing/include/database.cuh \
   /home/tarun/testing/include/memory.cuh \
   /home/tarun/testing/include/parser.h \
   /home/tarun/testing/include/work.cuh \
@@ -1064,6 +1065,8 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/x86_64-linux-gnu/bits/types/clock_t.h:
 
+/usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h:
+
 /usr/include/c++/13/ext/type_traits.h:
 
 /usr/include/c++/13/ext/string_conversions.h:
@@ -1212,21 +1215,9 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/c++/13/bits/parse_numbers.h:
 
-/usr/include/c++/13/bits/cxxabi_forced.h:
+/usr/include/c++/13/bits/ostream_insert.h:
 
-/usr/include/c++/13/cstddef:
-
-/usr/include/x86_64-linux-gnu/c++/13/bits/ctype_base.h:
-
-/usr/include/c++/13/bits/ranges_util.h:
-
-/usr/include/c++/13/bits/stl_iterator_base_funcs.h:
-
-/usr/include/asm-generic/errno-base.h:
-
-/usr/include/x86_64-linux-gnu/bits/wchar2-decl.h:
-
-/usr/include/c++/13/bits/erase_if.h:
+/usr/include/c++/13/math.h:
 
 /usr/include/c++/13/bits/atomic_lockfree_defines.h:
 
@@ -1296,6 +1287,22 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/c++/13/backward/binders.h:
 
+/usr/local/cuda-12.6/targets/x86_64-linux/include/crt/common_functions.h:
+
+/usr/include/c++/13/ext/alloc_traits.h:
+
+/usr/include/c++/13/new:
+
+/usr/include/c++/13/bits/alloc_traits.h:
+
+/usr/include/c++/13/bits/concept_check.h:
+
+/usr/include/c++/13/cerrno:
+
+/usr/include/x86_64-linux-gnu/bits/stdint-least.h:
+
+/usr/include/x86_64-linux-gnu/bits/strings_fortified.h:
+
 /home/tarun/testing/include/parser.h:
 
 /usr/include/c++/13/bits/stl_heap.h:
@@ -1324,10 +1331,6 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/c++/13/numbers:
 
-/usr/include/c++/13/bits/concept_check.h:
-
-/usr/include/c++/13/bits/alloc_traits.h:
-
 /usr/local/cuda-12.6/targets/x86_64-linux/include/sm_32_intrinsics.hpp:
 
 /usr/include/c++/13/bits/codecvt.h:
@@ -1346,17 +1349,31 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/c++/13/tr1/exp_integral.tcc:
 
-/usr/local/cuda-12.6/targets/x86_64-linux/include/crt/common_functions.h:
+/home/tarun/testing/include/database.cuh:
 
-/usr/include/c++/13/ext/alloc_traits.h:
+/usr/include/unistd.h:
 
-/usr/include/c++/13/new:
+/usr/include/x86_64-linux-gnu/c++/13/bits/gthr-default.h:
 
-/usr/include/c++/13/cerrno:
+/usr/include/x86_64-linux-gnu/bits/types/struct_timespec.h:
 
-/usr/include/x86_64-linux-gnu/bits/stdint-least.h:
+/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
 
-/usr/include/x86_64-linux-gnu/bits/strings_fortified.h:
+/usr/include/c++/13/bits/cxxabi_forced.h:
+
+/usr/include/c++/13/cstddef:
+
+/usr/include/x86_64-linux-gnu/c++/13/bits/ctype_base.h:
+
+/usr/include/c++/13/bits/ranges_util.h:
+
+/usr/include/c++/13/bits/stl_iterator_base_funcs.h:
+
+/usr/include/asm-generic/errno-base.h:
+
+/usr/include/x86_64-linux-gnu/bits/wchar2-decl.h:
+
+/usr/include/c++/13/bits/erase_if.h:
 
 /usr/include/c++/13/bits/localefwd.h:
 
@@ -1391,10 +1408,6 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/x86_64-linux-gnu/bits/types/error_t.h:
 
 /usr/include/c++/13/bits/hashtable.h:
-
-/usr/include/c++/13/bits/ostream_insert.h:
-
-/usr/include/c++/13/math.h:
 
 /usr/include/c++/13/bits/stl_relops.h:
 
@@ -1552,14 +1565,6 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/x86_64-linux-gnu/bits/struct_rwlock.h:
 
-/usr/include/unistd.h:
-
-/usr/include/x86_64-linux-gnu/c++/13/bits/gthr-default.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/struct_timespec.h:
-
-/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
-
 /usr/include/c++/13/tr1/riemann_zeta.tcc:
 
 /usr/include/x86_64-linux-gnu/asm/unistd.h:
@@ -1669,5 +1674,3 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/c++/13/bits/stl_multimap.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/__locale_t.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h:
