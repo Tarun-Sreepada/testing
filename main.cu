@@ -22,7 +22,7 @@
 #define blocks 1
 
 __global__ void copy(
-    CudaMemoryManager *memory_manager,
+    CudaMemoryManager *mm,
     AtomicWorkStack *work_queue,
     Item *items,
     int *start,
@@ -37,35 +37,22 @@ __global__ void copy(
 
     int item_count = end[num_transactions - 1] - start[0];
 
-    int bytes_to_allocate = 2 * sizeof(int) +                        // pattern
-                            sizeof(Database) +                       // db
-                            item_count * sizeof(Item) +              // items
-                            num_transactions * sizeof(Transaction) + // start, end, utility
-                            sizeof(int);                             // work done
-
-    void *base_ptr = deviceMemMalloc(memory_manager, bytes_to_allocate);
-    memset(base_ptr, 0, bytes_to_allocate);
-
     WorkItem work_item;
-    work_item.base_ptr = base_ptr;
-    work_item.bytes_to_alloc = bytes_to_allocate;
 
     // pattern
-    work_item.pattern = reinterpret_cast<int *>(base_ptr);
-    base_ptr += 2 * sizeof(int);
+    work_item.pattern = reinterpret_cast<int *>(mm->malloc((2 + num_primary) * sizeof(int)));
 
     // db
-    work_item.db = reinterpret_cast<Database *>(base_ptr);
-    base_ptr += sizeof(Database);
+    work_item.db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
 
     // items
-    work_item.db->d_data = reinterpret_cast<Item *>(base_ptr);
+    // work_item.db->d_data = reinterpret_cast<Item *>(base_ptr);
+    work_item.db->d_data = reinterpret_cast<Item *>(mm->malloc(item_count * sizeof(Item)));
     memcpy(work_item.db->d_data, items, item_count * sizeof(Item));
     work_item.db->numItems = item_count;
-    base_ptr += item_count * sizeof(Item);
 
     // transactions
-    work_item.db->d_transactions = reinterpret_cast<Transaction *>(base_ptr);
+    work_item.db->d_transactions = reinterpret_cast<Transaction *>(mm->malloc(num_transactions * sizeof(Transaction)));
     work_item.db->numTransactions = num_transactions;
     for (int i = 0; i < num_transactions; i++)
     {
@@ -73,20 +60,14 @@ __global__ void copy(
         work_item.db->d_transactions[i].start = start[i];
         work_item.db->d_transactions[i].end = end[i];
     }
-    base_ptr += num_transactions * sizeof(Transaction);
-
     // counts
     work_item.db->numItems = item_count;
     work_item.db->numTransactions = num_transactions;
 
-    // work_item.primaries = reinterpret_cast<int *>(base_ptr);
-    // memcpy(work_item.primaries, primary, num_primary * sizeof(int));
-
-    work_item.work_done = reinterpret_cast<int *>(base_ptr);
+    work_item.work_done = reinterpret_cast<int *>(mm->malloc(sizeof(int)));
     work_item.work_count = num_primary;
     work_item.max_item = max_item;
 
-    // stack_push(work_queue, work_item);
     for (int i = 0; i < num_primary; i++)
     {
         work_item.primary = primary[i];
@@ -110,17 +91,6 @@ __device__ void printDB(Database *db)
     // printf("\n\n");
 }
 
-__device__ uint32_t pcg_hash(uint32_t input)
-{
-    uint32_t state = input * 747796405u + 2891336453u;
-    uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-__device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
-{
-    return pcg_hash(key) % tableSize;
-}
 
 // __device__ void add_local_util(local_util, old->max_item * scale, old->db->d_data[i].key, total_util);
 __device__ void add_bucket_util(Item *local_util, int max_item, int key, int total_util)
@@ -188,11 +158,6 @@ __global__ void project(WorkItem *old, WorkItem *curr, Item *local_util)
     {
         total_util += old->db->d_data[i].util;
     }
-    // curr->db->d_transactions[tran_ret].end = ret + items_this_trans;
-
-    // printf("Transaction: %d\tUtility: %d\tStart: %d\tEnd: %d\tItems: %d\n", tran_ret, curr->db->d_transactions[tran_ret].utility, curr->db->d_transactions[tran_ret].start, curr->db->d_transactions[tran_ret].end, items_this_trans);
-    // memcpy(curr->db->d_data + ret, old->db->d_data + idx+1, items_this_trans * sizeof(Item));
-    // curr->db->d_transactions[tran_ret].end = ret + items_this_trans;
 
     for (int i = idx+1; i < old->db->d_transactions[tid].end; i++)
     {
@@ -210,7 +175,7 @@ __device__ void printBucketUtil(Item *local_util, int max_item)
     printf("Bucket Util: \t");
     for (int i = 0; i < max_item; i++)
     {
-        if (local_util[i].key != 0)
+        // if (local_util[i].key != 0)
         {
             printf("%d:%d ", local_util[i].key, local_util[i].util);
         }
@@ -218,10 +183,39 @@ __device__ void printBucketUtil(Item *local_util, int max_item)
     printf("\n");
 }
 
-__global__ void verify(CudaMemoryManager *memory_manager, AtomicWorkStack *work_queue)
+
+__global__ void trim_and_merge(WorkItem *curr, Item *local_util, Item *hashes, Item *subtree_util, int min_util)
 {
-    // WorkItem work_item;
-    WorkItem *work_item = reinterpret_cast<WorkItem *>(deviceMemMalloc(memory_manager, sizeof(WorkItem)));
+    int tid = blockIdx.x;
+
+    if (tid >= curr->db->numTransactions) return;
+    int curr_loc = 0;
+
+    for (int i = 0; i < curr->db->d_transactions[tid].length(); i++)
+    {
+        int idx = hashFunction(curr->db->d_transactions[tid].get()[i].key, curr->max_item * scale);
+        printf("TID:%d\tItem: %d\tLocal Util Idx: %d\tLocal Util: %d\n", tid, curr->db->d_transactions[tid].get()[i].key, idx, local_util[idx].util);
+        if (local_util[idx].util >= min_util)
+        {
+            // make the item be written to curr_loc in the transaction
+            curr->db->d_data[curr->db->d_transactions[tid].start + curr_loc] = curr->db->d_transactions[tid].get()[i];
+            curr_loc++;
+        }
+
+
+    }
+
+    // update the transaction length
+    curr->db->d_transactions[tid].end = curr->db->d_transactions[tid].start + curr_loc;
+    printf("Transaction Length: %d\n", curr->db->d_transactions[tid].length());
+
+
+    atomicAdd(&curr->db->transaction_tracker, 1);
+}
+
+__global__ void verify(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min_util)
+{
+    WorkItem *work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
     printf("Work Count: %d\n", stack_get_work_count(work_queue));
 
     while (stack_get_work_count(work_queue) > 0)
@@ -235,71 +229,36 @@ __global__ void verify(CudaMemoryManager *memory_manager, AtomicWorkStack *work_
         }
         printf("(%d)\n", work_item->primary);
 
-        // printf("Work Done: %d\n", work_item->work_done[0]);
-        // printf("Work Count: %d\n", work_item->work_count);
-        // printf("Bytes: %d\n", work_item->bytes_to_alloc);
         printDB(work_item->db);
 
 
-        // WorkItem new_work_item;
-        WorkItem *new_work_item = reinterpret_cast<WorkItem *>(deviceMemMalloc(memory_manager, sizeof(WorkItem)));
+        WorkItem *new_work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
 
-
-        int bytes_to_allocate = sizeof(int) * (work_item->pattern[0] + 2) +            // pattern
-                                sizeof(Database) +                                     // db
-                                work_item->db->numItems * sizeof(Item) +               // items
-                                work_item->db->numTransactions * sizeof(Transaction) + // start, end, utility
-                                sizeof(int);                                           // work done
-
-        // allocate memory
-        void *base_ptr = deviceMemMalloc(memory_manager, bytes_to_allocate);
-        memset(base_ptr, 0, bytes_to_allocate);
-
-        // meta data
-        new_work_item->base_ptr = base_ptr;
-        new_work_item->bytes_to_alloc = bytes_to_allocate;
 
         // pattern
-        new_work_item->pattern = reinterpret_cast<int *>(base_ptr);
+        new_work_item->pattern = reinterpret_cast<int *>(mm->malloc((work_item->pattern[0] + 2) * sizeof(int)));
         memcpy(new_work_item->pattern, work_item->pattern, (work_item->pattern[0]) * sizeof(int));
         new_work_item->pattern[++new_work_item->pattern[0]] = work_item->primary;
-        base_ptr += (work_item->pattern[0] + 2) * sizeof(int);
+        // base_ptr += (work_item->pattern[0] + 2) * sizeof(int);
 
         // db
-        new_work_item->db = reinterpret_cast<Database *>(base_ptr);
-        // // memcpy(new_work_item->db, work_item->db, sizeof(Database));
-        // /*
-        //     we will be using data to update stuff
-        // */
-        base_ptr += sizeof(Database);
+        new_work_item->db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
 
 
-        new_work_item->db->d_data = reinterpret_cast<Item *>(base_ptr);
-        // // memcpy(new_work_item->db->d_data, work_item->db->d_data, work_item->db->numItems * sizeof(Item));
-        // /*
-        //     we will be using data to update stuff
-        // */
-        base_ptr += work_item->db->numItems * sizeof(Item);
-
-        new_work_item->db->d_transactions = reinterpret_cast<Transaction *>(base_ptr);
-        // // memcpy(new_work_item->db->d_transactions, work_item->db->d_transactions, work_item->db->numTransactions * sizeof(Transaction));
-        // /*
-        //     we will be using data to update stuff
-        // */
-        base_ptr += work_item->db->numTransactions * sizeof(Transaction);
+        new_work_item->db->d_data = reinterpret_cast<Item *>(mm->malloc(work_item->db->numItems * sizeof(Item)));
 
 
-        // new_work_item->work_done = reinterpret_cast<int *>(base_ptr);
+        new_work_item->db->d_transactions = reinterpret_cast<Transaction *>(mm->malloc(work_item->db->numTransactions * sizeof(Transaction)));
 
-        Item *local_util = reinterpret_cast<Item *>(deviceMemMalloc(memory_manager, work_item->max_item * scale * sizeof(Item)));
+
+        // Item *local_util = reinterpret_cast<Item *>(deviceMemMalloc(memory_manager, work_item->max_item * scale * sizeof(Item)));
+        Item *local_util = reinterpret_cast<Item *>(mm->malloc(work_item->max_item * scale * sizeof(Item)));
 
 
         project<<<work_item->db->numTransactions, 1>>>(work_item, new_work_item, local_util);
 
         while (new_work_item->db->transaction_tracker != work_item->db->numTransactions)
         {
-        //     // merge<<<1,1>>>(work_item, new_work_item);
-            // printf("%d / %d\n", new_work_item->db->transaction_tracker, work_item->db->numTransactions);
             __threadfence();
         }
         printf("Number of Transactions: %d\n", new_work_item->db->numTransactions);
@@ -310,26 +269,43 @@ __global__ void verify(CudaMemoryManager *memory_manager, AtomicWorkStack *work_
 
         if (new_work_item->db->numTransactions == 0)
         {
-            deviceMemFree(memory_manager, new_work_item->base_ptr, new_work_item->bytes_to_alloc);
-            deviceMemFree(memory_manager, local_util, work_item->max_item * scale * sizeof(Item));
+            mm->free(new_work_item->pattern);
+            mm->free(new_work_item->db->d_data);
+            mm->free(new_work_item->db->d_transactions);
+            mm->free(new_work_item->db);
+
+            mm->free(local_util);
             atomicSub(&work_queue->active, 1);
             int ret = atomicAdd(&work_item->work_done[0], 1);
             if (ret == work_item->work_count - 1)
             {
-                deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes_to_alloc);
+
+                mm->free(work_item->pattern);
+                mm->free(work_item->db->d_data);
+                mm->free(work_item->db->d_transactions);
+                mm->free(work_item->db);
+                mm->free(work_item->work_done);
+
             } 
 
             continue;
         }
 
-        // // print local util
-        // for (int i = 0; i < work_item->max_item * scale; i++)
-        // {
-        //     if (local_util[i].key != 0)
-        //     {
-        //         printf("Key: %d\tUtil: %d\n", local_util[i].key, local_util[i].util);
-        //     }
-        // }
+        // trim and merge
+        Item *hashes = reinterpret_cast<Item *>(mm->malloc(new_work_item->db->numTransactions * sizeof(Item) * scale));
+        Item *subtree_util = reinterpret_cast<Item *>(mm->malloc(work_item->max_item * scale * sizeof(Item)));
+        new_work_item->db->transaction_tracker = 0;
+        new_work_item->max_item = work_item->max_item;
+
+        trim_and_merge<<<new_work_item->db->numTransactions, 1>>>(new_work_item, local_util, hashes, subtree_util, min_util);
+
+        while (new_work_item->db->transaction_tracker != new_work_item->db->numTransactions)
+        {
+            __threadfence();
+        }
+
+        printDB(new_work_item->db);
+
   
         // // print new work item
         // printf("Pattern: (len:%d) | ", new_work_item.pattern[0]);
@@ -376,7 +352,13 @@ __global__ void verify(CudaMemoryManager *memory_manager, AtomicWorkStack *work_
         int ret = atomicAdd(&work_item->work_done[0], 1);
         if (ret == work_item->work_count - 1)
         {
-            deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes_to_alloc);
+            // deviceMemFree(memory_manager, work_item->base_ptr, work_item->bytes_to_alloc);
+            // mm->free(work_item->base_ptr);
+            mm->free(work_item->pattern);
+            mm->free(work_item->db->d_data);
+            mm->free(work_item->db->d_transactions);
+            mm->free(work_item->db);
+            mm->free(work_item->work_done);
         }
         printf("\n");
         printf("Work Count: %d\n", stack_get_work_count(work_queue));
@@ -454,20 +436,21 @@ int main(int argc, char *argv[])
     // memory
     // std::cout << "Allocating Memory: " << page_count * page_size << " bytes\t(MB: " << (page_count * page_size) / (MEGA) << ")\n";
 
-    CudaMemoryManager *memory_manager = createMemoryManager(total_memory, page_size);
+    // CudaMemoryManager *memory_manager = createMemoryManager(total_memory, page_size);
+    CudaMemoryManager *mm = createCudaMemoryManager(total_memory / page_size, page_size);
 
     // start work queue
     AtomicWorkStack *work_queue;
     cudaMalloc(&work_queue, sizeof(AtomicWorkStack));
 
-    copy<<<1, 1>>>(memory_manager, work_queue, d_items, d_start, d_end, d_primary, primary.size(), num_transactions, max_item);
+    copy<<<1, 1>>>(mm, work_queue, d_items, d_start, d_end, d_primary, primary.size(), num_transactions, max_item);
     // Synchronize to ensure kernel completion
     cudaDeviceSynchronize();
         std::cout << "\n";
         std::cout << "\n";
 
 
-    verify<<<1, 1>>>(memory_manager, work_queue);
+    verify<<<1, 1>>>(mm, work_queue, args.utility);
 
     // // free the memory
     // cudaFree(d_items);

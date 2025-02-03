@@ -7,9 +7,6 @@
 
 struct WorkItem {
 
-    void *base_ptr;
-    int bytes_to_alloc;
-
     int *pattern;
 
     Database *db;

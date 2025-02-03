@@ -2,10 +2,53 @@
 #include <cstdint>
 
 
+
+__device__ uint32_t pcg_hash(uint32_t input)
+{
+    uint32_t state = input * 747796405u + 2891336453u;
+    uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+__device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
+{
+    return pcg_hash(key) % tableSize;
+}
+
+
+
+
+
 struct Item {
     int key;
     int util;
-} __attribute__((packed)); // Ensures tight memory layout
+
+}; 
+
+__device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
+{
+    uint32_t hash = 0;
+    for (int i = 0; i < n; i++)
+        hash ^= pcg_hash(items[i].key);
+    return hash % tableSize;
+}
+
+
+__device__ int find_item(const Item *items, int n, int key)
+{
+    uint32_t hash = hashFunction(key, n);
+
+    while (true)
+    {
+        // printf("hash: %d\tkey: %d\n", hash, key);
+        if (items[hash].key == key)
+            return hash;
+        if (items[hash].key == 0)
+            return -1;
+        hash = (hash + 1) % n;
+    }
+}
+
 
 struct Transaction {
     const Item* data;
@@ -16,6 +59,14 @@ struct Transaction {
 
     __device__ __host__
     int length() const { return end - start; }
+
+    __device__ __host__ operator bool() const { return start < end; }
+
+    __device__ __host__ const Item& operator[](int i) const { return data[start + i]; }
+
+    __device__ __host__ const Item& operator*() const { return data[start]; }
+
+    __device__ __host__ const Item* operator->() const { return data + start; }
 
     __device__ __host__
     const Item* get() const { return data + start; }
