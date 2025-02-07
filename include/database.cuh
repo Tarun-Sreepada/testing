@@ -22,7 +22,6 @@ __device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
 struct Item {
     int key;
     int util;
-
 }; 
 
 __device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
@@ -40,7 +39,6 @@ __device__ int find_item(const Item *items, int n, int key)
 
     while (true)
     {
-        // printf("hash: %d\tkey: %d\n", hash, key);
         if (items[hash].key == key)
             return hash;
         if (items[hash].key == 0)
