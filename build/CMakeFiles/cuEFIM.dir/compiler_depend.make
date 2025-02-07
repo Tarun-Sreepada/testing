@@ -5,6 +5,7 @@ CMakeFiles/cuEFIM.dir/main.cu.o: /home/tarun/testing/main.cu \
   /home/tarun/testing/include/args.h \
   /home/tarun/testing/include/database.cuh \
   /home/tarun/testing/include/memory.cuh \
+  /home/tarun/testing/include/mine.cuh \
   /home/tarun/testing/include/parser.h \
   /home/tarun/testing/include/work.cuh \
   /usr/include/alloca.h \
@@ -973,8 +974,6 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/local/cuda-12.6/targets/x86_64-linux/include/crt/sm_80_rt.h:
 
-/usr/local/cuda-12.6/targets/x86_64-linux/include/crt/sm_70_rt.hpp:
-
 /usr/local/cuda-12.6/targets/x86_64-linux/include/crt/sm_70_rt.h:
 
 /usr/local/cuda-12.6/targets/x86_64-linux/include/crt/math_functions.h:
@@ -1068,6 +1067,10 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h:
 
 /usr/include/c++/13/ext/type_traits.h:
+
+/usr/local/cuda-12.6/targets/x86_64-linux/include/crt/sm_70_rt.hpp:
+
+/home/tarun/testing/include/mine.cuh:
 
 /usr/include/c++/13/ext/string_conversions.h:
 
@@ -1219,6 +1222,10 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/c++/13/math.h:
 
+/usr/include/c++/13/bits/ostream.tcc:
+
+/usr/include/c++/13/numbers:
+
 /usr/include/c++/13/bits/atomic_lockfree_defines.h:
 
 /usr/include/x86_64-linux-gnu/asm/errno.h:
@@ -1234,6 +1241,10 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/c++/13/bits/fstream.tcc:
 
 /usr/include/c++/13/bits/istream.tcc:
+
+/usr/include/x86_64-linux-gnu/bits/types/__locale_t.h:
+
+/usr/include/c++/13/bits/stl_multimap.h:
 
 /usr/include/c++/13/bits/exception_ptr.h:
 
@@ -1303,34 +1314,6 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/x86_64-linux-gnu/bits/strings_fortified.h:
 
-/home/tarun/testing/include/parser.h:
-
-/usr/include/c++/13/bits/stl_heap.h:
-
-/usr/include/c++/13/utility:
-
-/usr/include/c++/13/ostream:
-
-/usr/local/cuda-12.6/targets/x86_64-linux/include/crt/sm_90_rt.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/confname.h:
-
-/usr/include/c++/13/bits/cpp_type_traits.h:
-
-/usr/include/x86_64-linux-gnu/bits/types.h:
-
-/usr/include/c++/13/bits/move.h:
-
-/usr/include/c++/13/bits/unordered_map.h:
-
-/home/tarun/testing/include/work.cuh:
-
-/usr/include/c++/13/bits/ios_base.h:
-
-/usr/include/c++/13/bits/ostream.tcc:
-
-/usr/include/c++/13/numbers:
-
 /usr/local/cuda-12.6/targets/x86_64-linux/include/sm_32_intrinsics.hpp:
 
 /usr/include/c++/13/bits/codecvt.h:
@@ -1340,6 +1323,22 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/c++/13/bits/stringfwd.h:
 
 /usr/include/c++/13/bits/iterator_concepts.h:
+
+/usr/include/c++/13/bits/unordered_map.h:
+
+/home/tarun/testing/include/parser.h:
+
+/usr/include/c++/13/bits/stl_heap.h:
+
+/usr/include/c++/13/utility:
+
+/usr/include/c++/13/bits/uniform_int_dist.h:
+
+/usr/include/c++/13/bits/locale_classes.tcc:
+
+/home/tarun/testing/include/work.cuh:
+
+/usr/include/c++/13/bits/ios_base.h:
 
 /usr/include/x86_64-linux-gnu/sys/select.h:
 
@@ -1358,6 +1357,18 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/x86_64-linux-gnu/bits/types/struct_timespec.h:
 
 /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
+
+/usr/include/c++/13/ostream:
+
+/usr/local/cuda-12.6/targets/x86_64-linux/include/crt/sm_90_rt.hpp:
+
+/usr/include/x86_64-linux-gnu/bits/confname.h:
+
+/usr/include/c++/13/bits/cpp_type_traits.h:
+
+/usr/include/x86_64-linux-gnu/bits/types.h:
+
+/usr/include/c++/13/bits/move.h:
 
 /usr/include/c++/13/bits/cxxabi_forced.h:
 
@@ -1413,10 +1424,6 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/x86_64-linux-gnu/bits/mathcalls.h:
 
-/usr/include/c++/13/bits/uniform_int_dist.h:
-
-/usr/include/c++/13/bits/locale_classes.tcc:
-
 /usr/include/c++/13/bits/ranges_algo.h:
 
 /usr/include/c++/13/bits/invoke.h:
@@ -1429,11 +1436,11 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 
 /usr/include/c++/13/bits/memoryfwd.h:
 
-/usr/include/c++/13/ios:
-
 /usr/include/x86_64-linux-gnu/gnu/stubs-64.h:
 
 /usr/include/c++/13/bits/node_handle.h:
+
+/usr/include/c++/13/ios:
 
 /usr/local/cuda-12.6/targets/x86_64-linux/include/sm_61_intrinsics.h:
 
@@ -1670,7 +1677,3 @@ CMakeFiles/cuEFIM.dir/src/parser.cpp.o: /home/tarun/testing/src/parser.cpp \
 /usr/include/math.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/__FILE.h:
-
-/usr/include/c++/13/bits/stl_multimap.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/__locale_t.h:

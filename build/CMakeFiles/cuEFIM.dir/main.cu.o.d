@@ -364,4 +364,5 @@ CMakeFiles/cuEFIM.dir/main.cu.o : /home/tarun/testing/main.cu \
     /usr/include/c++/13/bits/enable_special_members.h \
     /home/tarun/testing/include/work.cuh \
     /home/tarun/testing/include/database.cuh \
-    /home/tarun/testing/include/memory.cuh
+    /home/tarun/testing/include/memory.cuh \
+    /home/tarun/testing/include/mine.cuh
