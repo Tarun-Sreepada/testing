@@ -113,7 +113,7 @@ __global__ void project(WorkItem *old, WorkItem *curr, Item *local_util)
     // if (tid >= old->db->numTransactions)
     //     return;
 
-        // printf("TID: %d\n", tid);
+    // printf("TID: %d\n", tid);
 
     // find the item in old
     int item = curr->pattern[curr->pattern[0]];
@@ -123,7 +123,6 @@ __global__ void project(WorkItem *old, WorkItem *curr, Item *local_util)
         // printf("Item not found\n");
         atomicAdd(&curr->db->transaction_tracker, 1);
         __threadfence_system();
-
 
         return;
     }
@@ -160,6 +159,65 @@ __global__ void project(WorkItem *old, WorkItem *curr, Item *local_util)
     __threadfence_system();
 }
 
+__device__ void iterative_project(WorkItem *old, WorkItem *curr, Item *local_util)
+{
+
+    // int tid = blockIdx.x;
+
+    for (int tid = 0; tid < old->db->numTransactions; tid++)
+    {
+        // if (tid >= old->db->numTransactions)
+        //     return;
+
+        // printf("TID: %d\n", tid);
+
+        // find the item in old
+        int item = curr->pattern[curr->pattern[0]];
+        int idx = old->db->d_transactions[tid].findItem(item);
+        if (idx == -1)
+        {
+            // printf("Item not found\n");
+            atomicAdd(&curr->db->transaction_tracker, 1);
+            __threadfence_system();
+            continue;
+
+            // return;
+        }
+
+        int items_this_trans = old->db->d_transactions[tid].end - (idx + 1);
+        int ret = atomicAdd(&curr->db->numItems, items_this_trans);
+        int tran_ret = atomicAdd(&curr->db->numTransactions, 1);
+
+        curr->db->d_transactions[tran_ret].utility = old->db->d_transactions[tid].utility + old->db->d_data[idx].util;
+        curr->db->d_transactions[tran_ret].data = curr->db->d_data;
+
+        // write.
+
+        // update the db
+        curr->db->d_transactions[tran_ret].start = ret;
+
+        int total_util = curr->db->d_transactions[tran_ret].utility;
+        atomicAdd(&curr->utility, total_util);
+        for (int i = idx + 1; i < old->db->d_transactions[tid].end; i++)
+        {
+            total_util += old->db->d_data[i].util;
+        }
+
+        for (int i = idx + 1; i < old->db->d_transactions[tid].end; i++)
+        {
+            //     ret++;
+            curr->db->d_data[ret++] = old->db->d_data[i];
+            // printf("TID: %d\tItem: %d\tUtility: %d\n", tid, old->db->d_data[i].key, old->db->d_data[i].util);
+            add_bucket_util(local_util, old->max_item * scale, old->db->d_data[i].key, total_util);
+        }
+        curr->db->d_transactions[tran_ret].end = ret;
+
+        atomicAdd(&curr->db->transaction_tracker, 1);
+        __threadfence_system();
+    }
+    // printf("Tracker: %d\n", curr->db->transaction_tracker);
+}
+
 __device__ void printBucketUtil(Item *local_util, int max_item)
 {
     for (int i = 0; i < max_item; i++)
@@ -193,13 +251,11 @@ __device__ bool sameKey(const Database *db, int t1, int t2)
     return true;
 }
 
-
 __global__ void trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, Item *subtree_util, int min_util)
 {
     int tid = blockIdx.x;
 
     int curr_loc = 0;
-    
 
     int total_tran_util = curr->db->d_transactions[tid].utility;
 
@@ -213,7 +269,6 @@ __global__ void trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, It
             curr->db->d_data[curr->db->d_transactions[tid].start + curr_loc] = curr->db->d_transactions[tid].get()[i];
             curr_loc++;
             total_tran_util += curr->db->d_transactions[tid].get()[i].util;
-
         }
     }
 
@@ -230,7 +285,7 @@ __global__ void trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, It
     // printf("Mid TID: %d\n", tid);
 
     int hash_idx = items_hasher(curr->db->d_data + curr->db->d_transactions[tid].start, curr->db->d_transactions[tid].length(), curr->db->numTransactions * scale);
-    
+
     while (true)
     {
         int old = atomicCAS(&hashes[hash_idx], -1, tid);
@@ -241,8 +296,9 @@ __global__ void trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, It
         // if the slot is not empty and the key is the same, merge
         if (sameKey(curr->db, old, tid))
         {
-            if (tid == old) break;
-            
+            if (tid == old)
+                break;
+
             // if lenght is same
             if (curr->db->d_transactions[old].length() != curr->db->d_transactions[tid].length())
             {
@@ -275,13 +331,100 @@ __global__ void trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, It
         // printf("Hash Idx: %d\n", hash_idx);
     }
 
-
     atomicAdd(&curr->db->transaction_tracker, 1);
     __threadfence_system();
 
     return;
 }
 
+__device__ void iterative_trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, Item *subtree_util, int min_util)
+{
+    // int tid = blockIdx.x;
+    for (int tid = 0; tid < curr->db->numTransactions; tid++)
+    {
+
+    int curr_loc = 0;
+
+    int total_tran_util = curr->db->d_transactions[tid].utility;
+
+    for (int i = 0; i < curr->db->d_transactions[tid].length(); i++)
+    {
+        int idx = find_item(local_util, curr->max_item * scale, curr->db->d_transactions[tid].get()[i].key);
+        // printf("TID:%d\tItem: %d\tLocal Util Idx: %d\tLocal Util: %d\n", tid, curr->db->d_transactions[tid].get()[i].key, idx, local_util[idx].util);
+        if (local_util[idx].util >= min_util)
+        {
+            // make the item be written to curr_loc in the transaction
+            curr->db->d_data[curr->db->d_transactions[tid].start + curr_loc] = curr->db->d_transactions[tid].get()[i];
+            curr_loc++;
+            total_tran_util += curr->db->d_transactions[tid].get()[i].util;
+        }
+    }
+
+    curr->db->d_transactions[tid].end = curr->db->d_transactions[tid].start + curr_loc;
+
+    int temp_util = 0;
+    // update the subtree util
+    for (int i = 0; i < curr->db->d_transactions[tid].length(); i++)
+    {
+        add_bucket_util(subtree_util, curr->max_item * scale, curr->db->d_data[curr->db->d_transactions[tid].start + i].key, total_tran_util - temp_util);
+        temp_util += curr->db->d_data[curr->db->d_transactions[tid].start + i].util;
+    }
+
+    // printf("Mid TID: %d\n", tid);
+
+    int hash_idx = items_hasher(curr->db->d_data + curr->db->d_transactions[tid].start, curr->db->d_transactions[tid].length(), curr->db->numTransactions * scale);
+
+    while (true)
+    {
+        int old = atomicCAS(&hashes[hash_idx], -1, tid);
+        if (old == -1)
+        {
+            break;
+        }
+        // if the slot is not empty and the key is the same, merge
+        if (sameKey(curr->db, old, tid))
+        {
+            if (tid == old)
+                break;
+
+            // if lenght is same
+            if (curr->db->d_transactions[old].length() != curr->db->d_transactions[tid].length())
+            {
+                hash_idx = (hash_idx + 1) % (curr->db->numTransactions * scale);
+                continue;
+            }
+            // printf("TID:%d\tLength: %d\told tid: %d\tLength: %d\n", tid, curr->db->d_transactions[tid].length(), old, curr->db->d_transactions[old].length());
+
+            // printf("Merging %d and %d\n", old, tid);
+            // merge
+            for (int i = 0; i < curr->db->d_transactions[old].length(); i++)
+            {
+                // add the utility
+                atomicAdd(&curr->db->d_data[curr->db->d_transactions[old].start + i].util, curr->db->d_data[curr->db->d_transactions[tid].start + i].util);
+            }
+            atomicAdd(&curr->db->d_transactions[old].utility, curr->db->d_transactions[tid].utility);
+
+            // set this start and end to 0
+            curr->db->d_transactions[tid].start = 0;
+            curr->db->d_transactions[tid].end = 0;
+            curr->db->d_transactions[tid].utility = 0;
+
+            // update the transaction length
+            // curr->db->d_transactions[old].end = curr->db->d_transactions[old].start + old_loc;
+
+            break;
+        }
+        // if the slot is not empty and the key is not the same, find the next slot
+        hash_idx = (hash_idx + 1) % (curr->db->numTransactions * scale);
+        // printf("Hash Idx: %d\n", hash_idx);
+    }
+
+    atomicAdd(&curr->db->transaction_tracker, 1);
+    __threadfence_system();
+
+    // return;
+    }
+}
 
 __device__ void add_pattern(int *pattern, int utility, int *high_utility_patterns)
 {
@@ -307,8 +450,9 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
     {
         memset(new_work_item, 0, sizeof(WorkItem));
         memset(work_item, 0, sizeof(WorkItem));
-        
-        if (!stack_pop(work_queue, work_item)) {
+
+        if (!stack_pop(work_queue, work_item))
+        {
             __threadfence_system();
             continue;
         }
@@ -326,7 +470,7 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
 
         // // pattern
         new_work_item->pattern = reinterpret_cast<int *>(mm->malloc((work_item->pattern[0] + 2) * sizeof(int)));
-        memcpy(new_work_item->pattern, work_item->pattern, (work_item->pattern[0]+1) * sizeof(int));
+        memcpy(new_work_item->pattern, work_item->pattern, (work_item->pattern[0] + 1) * sizeof(int));
         new_work_item->pattern[++new_work_item->pattern[0]] = work_item->primary;
 
         new_work_item->db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
@@ -336,9 +480,12 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
         new_work_item->max_item = work_item->max_item;
         Item *local_util = reinterpret_cast<Item *>(mm->malloc(new_work_item->max_item * scale * sizeof(Item)));
         Item *subtree_util = reinterpret_cast<Item *>(mm->malloc(new_work_item->max_item * scale * sizeof(Item)));
-        
+
         printf("TID: %d\tProject\tBlock: %d\n", tid, work_item->db->numTransactions);
-        project<<<work_item->db->numTransactions, 1>>>(work_item, new_work_item, local_util);
+        // project<<<work_item->db->numTransactions, 1>>>(work_item, new_work_item, local_util);
+        iterative_project(work_item, new_work_item, local_util);
+            printf("TID: %d\tWaiting\tTracker: %d\tNum Transactions: %d\n", tid, new_work_item->db->transaction_tracker, work_item->db->numTransactions);
+
 
         while (new_work_item->db->transaction_tracker != work_item->db->numTransactions)
         {
@@ -346,10 +493,6 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
         }
 
         // printDB(new_work_item->db);
-
-
-
-
 
         // if utility is greater than min_util add to high utility patterns
         if (new_work_item->utility >= min_util)
@@ -391,9 +534,9 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
         memset(hashes, -1, new_work_item->db->numTransactions * sizeof(int) * scale);
         new_work_item->work_done = reinterpret_cast<int *>(mm->malloc(sizeof(int)));
 
-
         printf("TID: %d\tTrim and Merge\tBlock: %d\n", tid, new_work_item->db->numTransactions);
-        trim_and_merge<<<new_work_item->db->numTransactions, 1>>>(new_work_item, local_util, hashes, subtree_util, min_util);
+        // trim_and_merge<<<new_work_item->db->numTransactions, 1>>>(new_work_item, local_util, hashes, subtree_util, min_util);
+        iterative_trim_and_merge(new_work_item, local_util, hashes, subtree_util, min_util);
         while (new_work_item->db->transaction_tracker != new_work_item->db->numTransactions)
         {
             // printf("TID: %d\tWaiting\tTracker: %d\tNum Transactions: %d\n", tid, new_work_item->db->transaction_tracker, new_work_item->db->numTransactions);
@@ -409,7 +552,6 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
                 max_item++;
             }
         }
-
 
         int primary_count = 0;
         for (int i = 0; i < work_item->max_item * scale; i++)
@@ -456,15 +598,13 @@ __global__ void mine(CudaMemoryManager *mm, AtomicWorkStack *work_queue, int min
                 new_work_item->primary = subtree_util[i].key;
                 new_work_item->work_count = primary_count;
                 stack_push(work_queue, *new_work_item);
-            } 
+            }
         }
 
         // free the memory
         mm->free(local_util);
         mm->free(hashes);
         mm->free(subtree_util);
-
-
 
         atomicSub(&work_queue->active, 1);
         int ret = atomicAdd(&work_item->work_done[0], 1);

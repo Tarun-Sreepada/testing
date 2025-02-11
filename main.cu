@@ -21,11 +21,21 @@
 
 #define blocks 2
 
+//  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s 
+//  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s 
+
 
 
 
 int main(int argc, char *argv[])
 {
+
+    cudaError_t err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to set device flags: %s\n", cudaGetErrorString(err));
+        return -1;
+    }
+
     // Parse command-line arguments using args_parser
     ParsedArgs args;
     if (!parseArguments(argc, argv, args))
