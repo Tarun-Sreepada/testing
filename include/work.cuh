@@ -2,7 +2,7 @@
 #include <cstdint>
 #include "database.cuh"
 
-#define CAPACITY 4 * 1024
+#define CAPACITY 32 * 1024
 
 
 struct WorkItem {

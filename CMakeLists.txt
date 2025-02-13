@@ -30,9 +30,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # Add debugging flags for compute-sanitizer
 target_compile_options(${PROJECT_NAME} PRIVATE
     # Host compiler flags (C++):
-    $<$<COMPILE_LANGUAGE:CXX>:-O0 -g>  # Disable optimizations and add debug symbols
+    $<$<COMPILE_LANGUAGE:CXX>:-O3 -g>  # Disable optimizations and add debug symbols
     # Device compiler flags (CUDA):
-    $<$<COMPILE_LANGUAGE:CUDA>:-O0 -G -g --expt-relaxed-constexpr -Xcompiler=-g -Xcompiler=-DVERBOSE>
+    $<$<COMPILE_LANGUAGE:CUDA>:-O3 -G -g --expt-relaxed-constexpr -Xcompiler=-g -Xcompiler=-DVERBOSE>
 )
 
 # Set CUDA properties

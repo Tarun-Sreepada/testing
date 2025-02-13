@@ -25,7 +25,7 @@
 #define GIGA KILO *MEGA
 
 #define page_size 128
-#define total_memory 2 * GIGA
+#define total_memory 24 * GIGA
 
 //  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s 
 //  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s 
@@ -103,7 +103,7 @@ __global__ void copy (Item *d_items, int *d_start, int *d_end, int *d_primary, i
         curr_work_queue->push(work_item);
     }
 
-    printDatabase(work_item.db);
+    // printDatabase(work_item.db);
     // printf("Work Done: %d\n", *work_item.work_done);
 }
 
