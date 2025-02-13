@@ -1,5 +1,3 @@
-# CMakeLists.txt
-
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 project(cuEFIM
@@ -20,28 +18,30 @@ set(CMAKE_CUDA_ARCHITECTURES 75)
 # Automatically collect all .cpp and .cu files in src/
 file(GLOB SRC_FILES "src/*.cpp" "src/*.cu")
 
-
 # Create executable, including main.cu
 add_executable(${PROJECT_NAME} main.cu ${SRC_FILES})
 
 # Include directories for your project and ouroboros
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/Ouroboros/include
 )
 
-# Add -O3 optimization to both host (CXX) and device (CUDA) code.
-# Note we also keep your existing flags:
-#   -Xcompiler=-DVERBOSE
-#   --expt-relaxed-constexpr
-# and simply insert -O3 for both host and device compilation.
+# Add debugging flags for compute-sanitizer
 target_compile_options(${PROJECT_NAME} PRIVATE
     # Host compiler flags (C++):
-    $<$<COMPILE_LANGUAGE:CXX>:-O3>
+    $<$<COMPILE_LANGUAGE:CXX>:-O0 -g>  # Disable optimizations and add debug symbols
     # Device compiler flags (CUDA):
-    $<$<COMPILE_LANGUAGE:CUDA>:-O3 --expt-relaxed-constexpr -Xcompiler=-O3 -Xcompiler=-DVERBOSE>
+    $<$<COMPILE_LANGUAGE:CUDA>:-O0 -G -g --expt-relaxed-constexpr -Xcompiler=-g -Xcompiler=-DVERBOSE>
 )
 
 # Set CUDA properties
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
+
+# Ensure debugging info is available
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CUDA_DEBUG_INFO ON
+)
+

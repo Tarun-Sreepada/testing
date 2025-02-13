@@ -7,11 +7,11 @@ CUDA_DEFINES =
 
 CUDA_INCLUDES = --options-file CMakeFiles/cuEFIM.dir/includes_CUDA.rsp
 
-CUDA_FLAGS = -std=c++20 "--generate-code=arch=compute_75,code=[compute_75,sm_75]" -O3 --expt-relaxed-constexpr -Xcompiler=-O3 -Xcompiler=-DVERBOSE
+CUDA_FLAGS = -std=c++20 "--generate-code=arch=compute_75,code=[compute_75,sm_75]" -O0 -G -g --expt-relaxed-constexpr -Xcompiler=-g -Xcompiler=-DVERBOSE
 
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/tarun/testing/include
+CXX_INCLUDES = -I/home/tarun/testing/include -I/home/tarun/testing/external/Ouroboros/include
 
-CXX_FLAGS = -std=gnu++20 -O3
+CXX_FLAGS = -std=gnu++20 -O0 -g
 

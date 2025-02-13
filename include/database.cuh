@@ -1,8 +1,6 @@
 #pragma once
 #include <cstdint>
 
-
-
 __device__ uint32_t pcg_hash(uint32_t input)
 {
     uint32_t state = input * 747796405u + 2891336453u;
@@ -15,14 +13,11 @@ __device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
     return pcg_hash(key) % tableSize;
 }
 
-
-
-
-
-struct Item {
+struct Item
+{
     int key;
     int util;
-}; 
+};
 
 __device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
 {
@@ -31,7 +26,6 @@ __device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
         hash ^= pcg_hash(items[i].key);
     return hash % tableSize;
 }
-
 
 __device__ int find_item(const Item *items, int n, int key)
 {
@@ -47,31 +41,32 @@ __device__ int find_item(const Item *items, int n, int key)
     }
 }
 
-
-struct Transaction {
-    const Item* data;
+struct Transaction
+{
+    // Pointer to the first Item of this transaction’s subarray.
+    Item* data;
+    // Number of items in this transaction.
+    int length;
     int utility;
-    int start;
-    int end;
-    int hash;
 
-    __device__ __host__
-    int length() const { return end - start; }
+    __device__ __host__ int size() const { return length; }
 
-    __device__ __host__ operator bool() const { return start < end; }
+    // Allow treating the transaction like an array.
+    __device__ __host__ Item &operator[](int i) { return data[i]; }
+    __device__ __host__ const Item &operator[](int i) const { return data[i]; }
+    
+    __device__ __host__ Item *operator->() { return data; }
+    __device__ __host__ const Item *operator->() const { return data; }
+    
+    __device__ __host__ Item *get() { return data; }
+    __device__ __host__ const Item *get() const { return data; }
 
-    __device__ __host__ const Item& operator[](int i) const { return data[start + i]; }
-
-    __device__ __host__ const Item& operator*() const { return data[start]; }
-
-    __device__ __host__ const Item* operator->() const { return data + start; }
-
-    __device__ __host__
-    const Item* get() const { return data + start; }
-
-    __device__ int findItem(uint32_t search_id) const {
-        int l = start, r = end - 1;
-        while (l <= r) {
+    // Binary search for a given key in this transaction.
+    __device__ int findItem(uint32_t search_id) const
+    {
+        int l = 0, r = length - 1;
+        while (l <= r)
+        {
             int mid = l + (r - l) / 2;
             if (data[mid].key == search_id)
                 return mid;
@@ -81,10 +76,36 @@ struct Transaction {
     }
 };
 
-struct Database {
-    Item* d_data;
-    Transaction* d_transactions;
+struct Database
+{
+    Item *d_data;
+    Transaction *d_transactions;
     int numTransactions;
     int transaction_tracker;
     int numItems;
 };
+
+__device__ void printDatabase(const Database *db)
+{
+    if (!db) {
+        printf("Database pointer is NULL!\n");
+        return;
+    }
+    
+    // Loop over each transaction.
+    for (int t = 0; t < db->numTransactions; t++)
+    {
+        const Transaction &tran = db->d_transactions[t];
+        // printf("\n-- Transaction %d --\n", t);
+        // printf("Length   : %d\n", tran.length);
+        // printf("Utility  : %d\n", tran.utility);
+        
+        printf("%d|", tran.utility);
+        // // Loop over each item in the transaction.
+        for (int i = 0; i < tran.length; i++)
+        {
+            printf("%d:%d ", tran.data[i].key, tran.data[i].util);
+        }
+        printf("\n");
+    }
+}
