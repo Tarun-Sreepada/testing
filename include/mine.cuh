@@ -390,6 +390,7 @@ __device__ void iterative_trim_and_merge(WorkItem *curr,
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
     int count = atomicAdd(&high_utility_patterns[0], 1);
+    printf("Pattern Count:%d\n", count);
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -402,18 +403,20 @@ __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 }
 
 // template <typename MemoryManagerType>
-__global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work_queue, int32_t *d_high_utility_patterns, CudaMemoryManager *mm, int min_util)
+__global__ void test(AtomicWorkStack **curr_work_queue, int32_t *d_high_utility_patterns, CudaMemoryManager *mm, int min_util)
 {
 
-    int i = blockIdx.x;
-    // printf("\nNumber of current work items: %d\n", curr_work_queue->top);
     WorkItem *item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
     WorkItem *new_work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
 
-    // for (int i = 0; i < curr_work_queue->top; i++)
+    int tid = blockIdx.x;
+
+    while (curr_work_queue[tid]->active > 0)
     {
-        item = &curr_work_queue->items[i];
-        // printf("Item %d started\n", i);
+        if (!curr_work_queue[tid]->pop(item))
+        {
+            continue;
+        }
 
         memset(new_work_item, 0, sizeof(WorkItem));
 
@@ -440,14 +443,11 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
 
         iterative_project(item, new_work_item, local_util);
         // project<<<item->db->numTransactions, 1>>>(item, new_work_item, local_util);
-
-        // while (new_work_item->db->transaction_tracker != item->db->numTransactions) // spin
+        // while(new_work_item->db->transaction_tracker != item->db->numTransactions)
         // {
-        //     // printf("%d|%d\n", new_work_item->db->transaction_tracker, item->db->numTransactions);
-        //     // __threadfence_system();
+        //     // printf("Waiting\n");
+        //     __threadfence_system();
         // }
-
-        // printf("Item %d projected\n", i);
 
         // if utility is greater than min_util add to high utility patterns
         if (new_work_item->utility >= min_util)
@@ -477,8 +477,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
                 mm->free(item->work_done);
             }
 
-            // continue;
-            return;
+            curr_work_queue[tid]->finish_task();
+
+            continue;
+            // return;
         }
 
         // trim and merge
@@ -487,20 +489,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
         memset(hashes, -1, new_work_item->db->numTransactions * sizeof(int) * scale);
         new_work_item->work_done = reinterpret_cast<int *>(mm->malloc(sizeof(int)));
 
-        // trim_and_merge<<<new_work_item->db->numTransactions, 1>>>(new_work_item, local_util, hashes, subtree_util, min_util);
         iterative_trim_and_merge(new_work_item, local_util, hashes, subtree_util, min_util);
-        // printf("Item %d trimmed and merged\n", i);
-        // printf("Trim and Merge\n");
-        // printDatabase(new_work_item->db);
-
-        // printf("Subtree Util: ");
-        // printBucketUtil(subtree_util, item->max_item * scale);
-
-        // while (new_work_item->db->transaction_tracker != new_work_item->db->numTransactions)
-        // {
-        //     // printf("TID: %d\tWaiting\tTracker: %d\tNum Transactions: %d\n", tid, new_work_item->db->transaction_tracker, new_work_item->db->numTransactions);
-        //     __threadfence();
-        // }
 
         int max_item = 0;
         // go through local util and find number of items greater than min_util
@@ -520,8 +509,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
                 primary_count++;
             }
         }
-        // printf("Primary Count: %d\n", primary_count);
-        // printf("Max Item: %d\n", max_item);
 
         if (primary_count == 0)
         {
@@ -536,7 +523,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
             mm->free(new_work_item->db);
 
             int ret = atomicAdd(&item->work_done[0], 1);
-            if (ret == item->work_count - 1)
+            if (ret == (item->work_count - 1))
             {
                 mm->free(item->pattern);
                 mm->free(item->db->d_data);
@@ -545,8 +532,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
                 mm->free(item->work_done);
             }
 
-            // continue;
-            return;
+            curr_work_queue[tid]->finish_task(); 
+
+            continue;
+            // return;
         }
 
         new_work_item->max_item = max_item;
@@ -556,7 +545,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
             {
                 new_work_item->primary = subtree_util[i].key;
                 new_work_item->work_count = primary_count;
-                new_work_queue->push(*new_work_item);
+                curr_work_queue[tid]->push(*new_work_item);
             }
         }
 
@@ -566,7 +555,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
         mm->free(subtree_util);
 
         int ret = atomicAdd(&item->work_done[0], 1);
-        if (ret == item->work_count - 1)
+        if (ret == (item->work_count - 1))
         {
             mm->free(item->pattern);
             mm->free(item->db->d_data);
@@ -575,9 +564,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, AtomicWorkStack *new_work
             mm->free(item->work_done);
         }
 
-        // // // }
-        // printf("\n");
-        // // return;
-        // printf("Item %d done\n", i);
+        curr_work_queue[tid]->finish_task();
+
     }
 }
