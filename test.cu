@@ -16,6 +16,8 @@ __managed__ unsigned int printedPushCount = 0;  // Total pushes printed.
 // We'll still use an array to record per-index pushes (for additional debugging).
 __managed__ int *appeared;  
 
+// https://secondboyet.com/Articles/LockfreeStack.html
+
 struct WorkItem {
     int *pattern;
     int pattern_length;
@@ -62,11 +64,12 @@ struct AtomicWorkStack {
         atomicAdd(&printedPushCount, 1);
         
         // Increment 'active'
-        unsigned int oldActive, newActive;
-        do {
-            oldActive = active;
-            newActive = oldActive + 1;
-        } while (atomicCAS((unsigned int *)&active, oldActive, newActive) != oldActive);
+        atomicAdd((unsigned int *)&active, 1);
+        // unsigned int oldActive, newActive;
+        // do {
+        //     oldActive = active;
+        //     newActive = oldActive + 1;
+        // } while (atomicCAS((unsigned int *)&active, oldActive, newActive) != oldActive);
         
         return true;
     }
