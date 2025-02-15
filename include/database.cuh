@@ -92,16 +92,11 @@ __device__ void printDatabase(const Database *db)
         return;
     }
     
-    // Loop over each transaction.
     for (int t = 0; t < db->numTransactions; t++)
     {
         const Transaction &tran = db->d_transactions[t];
-        // printf("\n-- Transaction %d --\n", t);
-        // printf("Length   : %d\n", tran.length);
-        // printf("Utility  : %d\n", tran.utility);
         
         printf("%d|", tran.utility);
-        // // Loop over each item in the transaction.
         for (int i = 0; i < tran.length; i++)
         {
             printf("%d:%d ", tran.data[i].key, tran.data[i].util);

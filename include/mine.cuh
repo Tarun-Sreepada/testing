@@ -390,7 +390,7 @@ __device__ void iterative_trim_and_merge(WorkItem *curr,
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
     int count = atomicAdd(&high_utility_patterns[0], 1);
-    printf("Pattern Count:%d\n", count);
+    // printf("Pattern Count:%d\tUtility:%d\tLast Item:%d\n", count, wi->utility, wi->pattern[wi->pattern_length - 1]);
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -403,20 +403,25 @@ __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 }
 
 // template <typename MemoryManagerType>
-__global__ void test(AtomicWorkStack **curr_work_queue, int32_t *d_high_utility_patterns, CudaMemoryManager *mm, int min_util)
+__global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_patterns, CudaMemoryManager *mm, int min_util)
 {
 
     WorkItem *item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
     WorkItem *new_work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
 
-    int tid = blockIdx.x;
+    // int tid = blockIdx.x;
 
-    while (curr_work_queue[tid]->active > 0)
+    while (curr_work_queue->get_active() > 0)
     {
-        if (!curr_work_queue[tid]->pop(item))
+        if (!curr_work_queue->pop(item))
         {
+            // printf("TID: %d\tCount: %d\n", tid, curr_work_queue->get_active());
+            // __nanosleep(1000);
             continue;
         }
+        // printf("TID: %d\tCount: %d\n", tid, curr_work_queue->get_active());
+        // printf("TID: %d\tItem: %d\n", tid, item->primary);
+
 
         memset(new_work_item, 0, sizeof(WorkItem));
 
@@ -477,7 +482,7 @@ __global__ void test(AtomicWorkStack **curr_work_queue, int32_t *d_high_utility_
                 mm->free(item->work_done);
             }
 
-            curr_work_queue[tid]->finish_task();
+            curr_work_queue->finish_task();
 
             continue;
             // return;
@@ -532,7 +537,7 @@ __global__ void test(AtomicWorkStack **curr_work_queue, int32_t *d_high_utility_
                 mm->free(item->work_done);
             }
 
-            curr_work_queue[tid]->finish_task(); 
+            curr_work_queue->finish_task(); 
 
             continue;
             // return;
@@ -545,7 +550,7 @@ __global__ void test(AtomicWorkStack **curr_work_queue, int32_t *d_high_utility_
             {
                 new_work_item->primary = subtree_util[i].key;
                 new_work_item->work_count = primary_count;
-                curr_work_queue[tid]->push(*new_work_item);
+                curr_work_queue->push(*new_work_item);
             }
         }
 
@@ -564,7 +569,7 @@ __global__ void test(AtomicWorkStack **curr_work_queue, int32_t *d_high_utility_
             mm->free(item->work_done);
         }
 
-        curr_work_queue[tid]->finish_task();
+        curr_work_queue->finish_task();
 
     }
 }

@@ -2,7 +2,7 @@
 #include <cstdint>
 #include "database.cuh"
 
-#define CAPACITY 1 * 1024
+#define CAPACITY (128 * 1024)
 
 
 struct WorkItem {
@@ -23,75 +23,76 @@ struct WorkItem {
 
 };
 
+
 struct AtomicWorkStack {
     WorkItem items[CAPACITY];
-    // 'top' is the index of the next free slot (i.e., valid items are in indices 0..top-1).
-    unsigned int top;
-    unsigned int active;
+    volatile unsigned int top;
+    volatile unsigned int active;  // volatile so threads always reload its value
+    
+    // Add a lock variable (0 = unlocked, 1 = locked).
+    int lock;
 
-    // Initialize the stack on the device (and host).
     __device__ __host__ void init() {
         top = 0;
         active = 0;
+        lock = 0;
+        memset(items, 0, sizeof(items));
     }
     
-    // Device push using a CAS loop.
-    __device__ bool push(WorkItem item) {
-        unsigned int oldTop, newTop;
-        // Loop until we successfully update 'top'
-        do {
-            oldTop = top;
-            // Check if the stack is full.
-            if (oldTop >= CAPACITY) {
-                return false;
-            }
-            newTop = oldTop + 1;
-        } while (atomicCAS(&top, oldTop, newTop) != oldTop);
-        
-        // Now we have reserved slot 'oldTop'; store the item.
-        items[oldTop] = item;
-        atomicAdd(&active, 1);
-        // // Increment 'active' using a CAS loop.
-        // unsigned int oldActive, newActive;
-        // do {
-        //     oldActive = active;
-        //     newActive = oldActive + 1;
-        // } while (atomicCAS(&active, oldActive, newActive) != oldActive);
-        
-        return true;
-    }
-
-    // Device pop using a CAS loop.
-    __device__ bool pop(WorkItem *item) {
-        unsigned int oldTop, newTop;
-        // Loop until we successfully update 'top'
-        do {
-            oldTop = top;
-            // If the stack is empty, return false.
-            if (oldTop == 0) {
-                return false;
-            }
-            newTop = oldTop - 1;
-        } while (atomicCAS(&top, oldTop, newTop) != oldTop);
-        
-        // Retrieve the item from the reserved slot.
-        *item = items[newTop];
-        return true;
-    }
-
-    // When a task is finished, decrement the active counter using a CAS loop.
-    __device__ void finish_task() {
-        atomicSub(&active, 1);
-        // unsigned int oldActive, newActive;
-        // do {
-        //     oldActive = active;
-        //     newActive = oldActive - 1;
-        // } while (atomicCAS(&active, oldActive, newActive) != oldActive);
-    }
-    
-    // Host initialization helper.
     __host__ void init_host() {
         top = 0;
         active = 0;
+        lock = 0;
+    }
+
+    // Simple device-side spinlock using atomicCAS.
+    __device__ void acquire_lock() {
+        while (atomicCAS(&lock, 0, 1) != 0) {
+            // Busy-wait until the lock is acquired.
+            // __nanosleep(1000);
+        }
+    }
+
+    __device__ void release_lock() {
+        atomicExch(&lock, 0);
+    }
+    
+    // Push a work item using the lock.
+    __device__ bool push(WorkItem item) {
+        bool success = false;
+        acquire_lock();
+        if (top < CAPACITY) {
+            items[top] = item;
+            top = top + 1;
+            success = true;
+            // Update the global push counter.
+            // Increment 'active'
+            atomicAdd((unsigned int *)&active, 1);
+        }
+        release_lock();
+        return success;
+    }
+
+    // Pop a work item using the lock.
+    __device__ bool pop(WorkItem *item) {
+        bool success = false;
+        acquire_lock();
+        if (top > 0) {
+            top = top - 1;
+            *item = items[top];
+            success = true;
+        }
+        release_lock();
+        return success;
+    }
+
+    __device__ int get_active() {
+        // __threadfence();  // Optional for consistency.
+        return active;
+    }
+
+    // Mark a task as finished (decrement 'active').
+    __device__ void finish_task() {
+        atomicSub((unsigned int *)&active, 1);
     }
 };

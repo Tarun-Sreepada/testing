@@ -4,9 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
-//------------------------------------------------------------------------------
-// A header stored at the beginning of every allocated block.
-//------------------------------------------------------------------------------
+
 struct AllocationHeader
 {
     size_t pagesUsed; // Number of pages allocated for this block.

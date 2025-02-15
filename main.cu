@@ -16,14 +16,24 @@
 // #include "device/MemoryInitialization.cuh"
 // #include "InstanceDefinitions.cuh"
 // #include "Utility.h"
+/*
+
+b e c UTIL: 45
+d b UTIL: 44
+d b c UTIL: 51
+d b e UTIL: 53
+d b e c UTIL: 60
+d e c UTIL: 45
+
+*/
 
 #define KILO 1024ULL
 #define MEGA KILO *KILO
 #define GIGA KILO *MEGA
 
-#define page_size 128
-#define total_memory 24 * GIGA
-
+#define page_size 512
+#define total_memory 4 * GIGA
+#define threads 64
 //  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 //  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 
@@ -31,6 +41,8 @@ std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::uno
 
 {
     std::map<std::string, int> Patterns;
+    int duplicate = 0;
+    int util_dup = 0;
 
     // convert high utility patterns to string
     std::string high_utility_patterns_str = "";
@@ -53,18 +65,38 @@ std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::uno
         {
             high_utility_patterns_str += rename[high_utility_patten[j]] + " ";
         }
-        Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
+
+        //
+
+        // Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
+        if (Patterns.find(high_utility_patterns_str) == Patterns.end())
+        {
+            Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
+        }
+        else
+        {
+            duplicate++;
+            // print old util and new util
+            // std::cout << "Old: " << Patterns[high_utility_patterns_str] << " New: " << high_utility_patten[high_utility_patten.size() - 1] << "\n";
+            if (Patterns[high_utility_patterns_str] == high_utility_patten[high_utility_patten.size() - 1])
+            {
+                util_dup++;
+            }
+        }
 
         high_utility_patterns_str = "";
         high_utility_patten.clear();
     }
+    std::cout << "Duplicate: " << duplicate << "\n";
+    std::cout << "Util Duplicate: " << util_dup << "\n";
     return Patterns;
 }
 
 // copy<<<1,1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
 // template <typename MemoryManagerType>
-__global__ void copy(Item *d_items, int *d_start, int *d_end, int *d_primary, int items_size, int start_size, int primary_size, int max_item, int *d_high_utility_patterns, CudaMemoryManager *mm, AtomicWorkStack **curr_work_queue, int utility)
+__global__ void copy(Item *d_items, int *d_start, int *d_end, int *d_primary, int items_size, int start_size, int primary_size, int max_item, int *d_high_utility_patterns, CudaMemoryManager *mm, AtomicWorkStack *curr_work_queue, int utility)
 {
+
     WorkItem work_item;
     work_item.pattern = (int *)mm->malloc(sizeof(int));
     work_item.pattern_length = 0;
@@ -95,8 +127,11 @@ __global__ void copy(Item *d_items, int *d_start, int *d_end, int *d_primary, in
     for (int i = 0; i < primary_size; i++)
     {
         work_item.primary = d_primary[i];
-        curr_work_queue[i]->push(work_item);
+        // curr_work_queue[i]->push(work_item);
+        curr_work_queue->push(work_item);
     }
+
+
 
     // printDatabase(work_item.db);
     // printf("Work Done: %d\n", *work_item.work_done);
@@ -104,7 +139,6 @@ __global__ void copy(Item *d_items, int *d_start, int *d_end, int *d_primary, in
 
 int main(int argc, char *argv[])
 {
-
     cudaError_t err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
     if (err != cudaSuccess)
     {
@@ -181,14 +215,16 @@ int main(int argc, char *argv[])
 
     // AtomicWorkStack *curr_work_queue;
     // cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
-    AtomicWorkStack **curr_work_queue;
+    AtomicWorkStack *curr_work_queue;
+    cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
+    curr_work_queue->init();
     // allocate as many work queues as there are primary items
-    cudaMallocManaged(&curr_work_queue, primary.size() * sizeof(AtomicWorkStack));
-    for (int i = 0; i < primary.size(); i++)
-    {
-        cudaMallocManaged(&curr_work_queue[i], sizeof(AtomicWorkStack));
-        curr_work_queue[i]->init();
-    }
+    // cudaMallocManaged(&curr_work_queue, primary.size() * sizeof(AtomicWorkStack));
+    // for (int i = 0; i < primary.size(); i++)
+    // {
+    //     cudaMallocManaged(&curr_work_queue[i], sizeof(AtomicWorkStack));
+    //     curr_work_queue[i]->init();
+    // }
 
 
     copy<<<1, 1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
@@ -201,12 +237,15 @@ int main(int argc, char *argv[])
 
 
     // cudaError_t cudaStatus = cudaGetLastError();
-    test<<<primary.size(), 1>>>(curr_work_queue, d_high_utility_patterns, mm, args.utility);
+    printf("Top: %d\n", curr_work_queue->active);
+
+    test<<<threads, 1>>>(curr_work_queue, d_high_utility_patterns, mm, args.utility);
     cudaDeviceSynchronize();
+    printf("Top: %d\n", curr_work_queue->active);
+
 
     // while (curr_work_queue->active > 0)
     {
-        // printf("Top: %d\n", curr_work_queue->active);
         // curr_work_queue->top
         
         //     cudaStatus = cudaGetLastError();
