@@ -13,21 +13,6 @@
 #include "memory.cuh" // Include the memory manager
 #include "mine.cuh"
 
-// #include "device/Ouroboros_impl.cuh"
-// #include "device/MemoryInitialization.cuh"
-// #include "InstanceDefinitions.cuh"
-// #include "Utility.h"
-/*
-
-b e c UTIL: 45
-d b UTIL: 44
-d b c UTIL: 51
-d b e UTIL: 53
-d b e c UTIL: 60
-d e c UTIL: 45
-
-*/
-
 #define KILO 1024ULL
 #define MEGA KILO *KILO
 #define GIGA KILO *MEGA
@@ -37,8 +22,8 @@ d e c UTIL: 45
 
 #define blocks 1024
 #define threads 128
-//  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
-//  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
+// make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
+// make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 
 std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::unordered_map<int, std::string> rename)
 
