@@ -33,8 +33,9 @@ d e c UTIL: 45
 #define GIGA KILO *MEGA
 
 #define page_size 512
-#define total_memory 28 * GIGA
-#define blocks 4096
+#define total_memory 24 * GIGA
+
+#define blocks 512
 #define threads 16
 //  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 //  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
