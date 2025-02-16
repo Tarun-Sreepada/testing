@@ -33,8 +33,9 @@ d e c UTIL: 45
 #define GIGA KILO *MEGA
 
 #define page_size 512
-#define total_memory 29 * GIGA
-#define threads 4096
+#define total_memory 28 * GIGA
+#define blocks 4096
+#define threads 16
 //  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 //  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 
@@ -133,13 +134,11 @@ __global__ void copy(Item *d_items, int *d_start, int *d_end, int *d_primary, in
     }
 
 
-
-    // printDatabase(work_item.db);
-    // printf("Work Done: %d\n", *work_item.work_done);
 }
 
 int main(int argc, char *argv[])
 {
+    // Make CPU not poll
     cudaError_t err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
     if (err != cudaSuccess)
     {
@@ -228,7 +227,7 @@ int main(int argc, char *argv[])
     // }
 
 
-    copy<<<1, 1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
+    copy<<<1,1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
     cudaDeviceSynchronize();
 
     cudaFree(d_items);
@@ -241,13 +240,13 @@ int main(int argc, char *argv[])
     printf("Top: %d\n", curr_work_queue->active);
     auto starttime = std::chrono::high_resolution_clock::now();
 
-    test<<<threads, 1>>>(curr_work_queue, d_high_utility_patterns, mm, args.utility);
+    test<<<blocks, threads>>>(curr_work_queue, d_high_utility_patterns, mm, args.utility);
     cudaDeviceSynchronize();
     printf("Top: %d\n", curr_work_queue->active);
 
     auto endtime = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count() / 1000 << " s\n";
+    std::cout << "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count() / 1000.0 << " s\n";
 
 
     // while (curr_work_queue->active > 0)

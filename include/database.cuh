@@ -83,6 +83,22 @@ struct Database
     int numTransactions;
     int transaction_tracker;
     int numItems;
+
+    __device__ bool sameKey(int t1, int t2)
+    {
+        const Transaction &trans1 = d_transactions[t1];
+        const Transaction &trans2 = d_transactions[t2];
+
+        if (trans1.length != trans2.length)
+            return false;
+
+        for (int i = 0; i < trans1.length; i++)
+        {
+            if (trans1.data[i].key != trans2.data[i].key)
+                return false;
+        }
+        return true;
+    }
 };
 
 __device__ void printDatabase(const Database *db)

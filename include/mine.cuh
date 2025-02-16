@@ -206,91 +206,6 @@ __device__ bool sameKey(const Database *db, int t1, int t2)
     return true;
 }
 
-__global__ void trim_and_merge(WorkItem *curr, Item *local_util, int *hashes, Item *subtree_util, int min_util)
-{
-    // int tid = blockIdx.x;
-    // int curr_loc = 0;
-
-    //     int total_tran_util = curr->db->d_transactions[tid].utility;
-
-    //     for (int i = 0; i < curr->db->d_transactions[tid].length(); i++)
-    //     {
-    //         int idx = find_item(local_util, curr->max_item * scale, curr->db->d_transactions[tid].get()[i].key);
-    //         // printf("TID:%d\tItem: %d\tLocal Util Idx: %d\tLocal Util: %d\n", tid, curr->db->d_transactions[tid].get()[i].key, idx, local_util[idx].util);
-    //         if (local_util[idx].util >= min_util)
-    //         {
-    //             // make the item be written to curr_loc in the transaction
-    //             curr->db->d_data[curr->db->d_transactions[tid].start + curr_loc] = curr->db->d_transactions[tid].get()[i];
-    //             curr_loc++;
-    //             total_tran_util += curr->db->d_transactions[tid].get()[i].util;
-    //         }
-    //     }
-
-    //     curr->db->d_transactions[tid].end = curr->db->d_transactions[tid].start + curr_loc;
-
-    //     int temp_util = 0;
-    //     // update the subtree util
-    //     for (int i = 0; i < curr->db->d_transactions[tid].length(); i++)
-    //     {
-    //         add_bucket_util(subtree_util, curr->max_item * scale, curr->db->d_data[curr->db->d_transactions[tid].start + i].key, total_tran_util - temp_util);
-    //         temp_util += curr->db->d_data[curr->db->d_transactions[tid].start + i].util;
-    //     }
-
-    //     // printf("Mid TID: %d\n", tid);
-
-    //     int hash_idx = items_hasher(curr->db->d_data + curr->db->d_transactions[tid].start, curr->db->d_transactions[tid].length(), curr->db->numTransactions * scale);
-
-    //     while (true)
-    //     {
-    //         int old = atomicCAS(&hashes[hash_idx], -1, tid);
-    //         if (old == -1)
-    //         {
-    //             break;
-    //         }
-    //         // if the slot is not empty and the key is the same, merge
-    //         if (sameKey(curr->db, old, tid))
-    //         {
-    //             if (tid == old)
-    //                 break;
-
-    //             // if lenght is same
-    //             if (curr->db->d_transactions[old].length() != curr->db->d_transactions[tid].length())
-    //             {
-    //                 hash_idx = (hash_idx + 1) % (curr->db->numTransactions * scale);
-    //                 continue;
-    //             }
-    //             // printf("TID:%d\tLength: %d\told tid: %d\tLength: %d\n", tid, curr->db->d_transactions[tid].length(), old, curr->db->d_transactions[old].length());
-
-    //             // printf("Merging %d and %d\n", old, tid);
-    //             // merge
-    //             for (int i = 0; i < curr->db->d_transactions[old].length(); i++)
-    //             {
-    //                 // add the utility
-    //                 atomicAdd(&curr->db->d_data[curr->db->d_transactions[old].start + i].util, curr->db->d_data[curr->db->d_transactions[tid].start + i].util);
-    //             }
-    //             atomicAdd(&curr->db->d_transactions[old].utility, curr->db->d_transactions[tid].utility);
-
-    //             // set this start and end to 0
-    //             curr->db->d_transactions[tid].start = 0;
-    //             curr->db->d_transactions[tid].end = 0;
-    //             curr->db->d_transactions[tid].utility = 0;
-
-    //             // update the transaction length
-    //             // curr->db->d_transactions[old].end = curr->db->d_transactions[old].start + old_loc;
-
-    //             break;
-    //         }
-    //         // if the slot is not empty and the key is not the same, find the next slot
-    //         hash_idx = (hash_idx + 1) % (curr->db->numTransactions * scale);
-    //         // printf("Hash Idx: %d\n", hash_idx);
-    //     }
-
-    //     atomicAdd(&curr->db->transaction_tracker, 1);
-    //     __threadfence_system();
-
-    //     return;
-}
-
 __device__ void iterative_trim_and_merge(WorkItem *curr,
                                          Item *local_util,
                                          int *hashes,
@@ -398,178 +313,463 @@ __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
     for (int i = 0; i < wi->pattern_length; i++)
     {
         high_utility_patterns[idx + i] = wi->pattern[i];
+        // printf("%d ", wi->pattern[i]);
     }
+    // printf(": %d\n", wi->utility);
     high_utility_patterns[idx + wi->pattern_length] = wi->utility;
 }
 
-// template <typename MemoryManagerType>
 __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_patterns, CudaMemoryManager *mm, int min_util)
 {
 
-    WorkItem *item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
-    WorkItem *new_work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
+    // WorkItem *item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
+    // WorkItem *new_work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
+    __shared__ WorkItem old_work_item;
+    __shared__ WorkItem new_work_item;
+    __shared__ Item *local_util;
+    __shared__ Item *subtree_util;
 
-    int tid = blockIdx.x;
+    __shared__ int item;
+
+    __shared__ int *hashes;
+    // __shared__ bool started;
+    // started = true;
+
+    int bid = blockIdx.x;
+    int tid = threadIdx.x;
+    // printf("Block: %d\tThread: %d\n", bid, tid);
+
+    __shared__ bool popped;
+
+    __shared__ int max_item;
+    // int max_item = 0;
+
+    __shared__ int primary_count;
+    // int primary_count = 0;
 
     while (curr_work_queue->get_active() > 0)
     {
-        if (!curr_work_queue->pop(item))
+        if (tid == 0)
         {
-            // printf("TID: %d\tCount: %d\n", tid, curr_work_queue->get_active());
-            // __nanosleep(1000);
-            continue;
+            // curr_work_queue->pop(item);
+            popped = curr_work_queue->pop(&old_work_item);
+            // if (popped) started = false;
+            // printf("BID: %d TID %d is popping\tActive:%d\n", bid, tid, curr_work_queue->get_active());
         }
-        // printf("TID: %d\tCount: %d\n", tid, curr_work_queue->get_active());
-        // printf("TID: %d\tItem: %d\n", tid, item->primary);
 
+        __syncthreads();
 
-        memset(new_work_item, 0, sizeof(WorkItem));
+        if (!popped)
+        {
+            continue; // skip
+        }
+        // printf("TID: %d\tPrimary: %d\n", tid, old_work_item.primary);
 
-        new_work_item->pattern = reinterpret_cast<int *>(mm->malloc((item->pattern_length + 1) * sizeof(int)));
-        memcpy(new_work_item->pattern, item->pattern, (item->pattern_length) * sizeof(int));
-        new_work_item->pattern[item->pattern_length] = item->primary;
-        new_work_item->pattern_length = item->pattern_length + 1;
+        if (tid == 0)
+        {
+            // printf("Primary: %d\n", old_work_item.primary);
+            item = old_work_item.primary;
 
-        new_work_item->db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
-        memset(new_work_item->db, 0, sizeof(Database));
-        new_work_item->db->d_data = reinterpret_cast<Item *>(mm->malloc(item->db->numItems * sizeof(Item)));
-        new_work_item->db->d_transactions = reinterpret_cast<Transaction *>(mm->malloc(item->db->numTransactions * sizeof(Transaction)));
+            memset(&new_work_item, 0, sizeof(WorkItem));
 
-        memset(new_work_item->db->d_data, 0, item->db->numItems * sizeof(Item));
-        memset(new_work_item->db->d_transactions, 0, item->db->numTransactions * sizeof(Transaction));
+            new_work_item.pattern = reinterpret_cast<int *>(mm->malloc((old_work_item.pattern_length + 1) * sizeof(int)));
+            memcpy(new_work_item.pattern, old_work_item.pattern, (old_work_item.pattern_length) * sizeof(int));
+            new_work_item.pattern[old_work_item.pattern_length] = old_work_item.primary;
+            new_work_item.pattern_length = old_work_item.pattern_length + 1;
 
-        new_work_item->max_item = item->max_item;
-        Item *local_util = reinterpret_cast<Item *>(mm->malloc(new_work_item->max_item * scale * sizeof(Item)));
-        memset(local_util, 0, new_work_item->max_item * scale * sizeof(Item));
-        Item *subtree_util = reinterpret_cast<Item *>(mm->malloc(new_work_item->max_item * scale * sizeof(Item)));
-        memset(subtree_util, 0, new_work_item->max_item * scale * sizeof(Item));
+            // // // print pattern
+            // printf("Pattern: ");
+            // for (int i = 0; i < new_work_item.pattern_length; i++)
+            // {
+            //     printf("%d ", new_work_item.pattern[i]);
+            // }
+            // printf("\n");
 
-        new_work_item->db->transaction_tracker = 0;
+            new_work_item.db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
+            memset(new_work_item.db, 0, sizeof(Database));
+            new_work_item.db->d_data = reinterpret_cast<Item *>(mm->malloc(old_work_item.db->numItems * sizeof(Item)));
+            new_work_item.db->d_transactions = reinterpret_cast<Transaction *>(mm->malloc(old_work_item.db->numTransactions * sizeof(Transaction)));
 
-        iterative_project(item, new_work_item, local_util);
-        // project<<<item->db->numTransactions, 1>>>(item, new_work_item, local_util);
-        // while(new_work_item->db->transaction_tracker != item->db->numTransactions)
+            memset(new_work_item.db->d_data, 0, old_work_item.db->numItems * sizeof(Item));
+            memset(new_work_item.db->d_transactions, 0, old_work_item.db->numTransactions * sizeof(Transaction));
+
+            new_work_item.max_item = old_work_item.max_item;
+            local_util = reinterpret_cast<Item *>(mm->malloc(new_work_item.max_item * scale * sizeof(Item)));
+            memset(local_util, 0, new_work_item.max_item * scale * sizeof(Item));
+            subtree_util = reinterpret_cast<Item *>(mm->malloc(new_work_item.max_item * scale * sizeof(Item)));
+            memset(subtree_util, 0, new_work_item.max_item * scale * sizeof(Item));
+
+            // started = true;
+        }
+
+        __syncthreads();
+
+        // project
+
+        // Iterate over all transactions in the old database.
+        for (int i = tid; i < old_work_item.db->numTransactions; i += blockDim.x)
+        {
+            // For easier reference.
+            Transaction &oldTrans = old_work_item.db->d_transactions[i];
+
+            int idx = oldTrans.findItem(item);
+            if (idx == -1)
+            {
+                continue;
+            }
+
+            // Compute the number of items after the found index.
+            int items_this_trans = oldTrans.length - (idx + 1);
+            // new_work_item.utility += oldTrans.utility + oldTrans.data[idx].util;
+            atomicAdd(&new_work_item.utility, oldTrans.utility + oldTrans.data[idx].util);
+
+            if (items_this_trans <= 0)
+            {
+                continue;
+            }
+
+            // Reserve space in the current (flat) data array.
+            // Record the starting index for the new transaction’s data.
+            // int new_start = curr->db->numItems;
+            // curr->db->numItems += items_this_trans;
+            int new_start = atomicAdd(&new_work_item.db->numItems, items_this_trans);
+
+            // Create a new transaction in curr->db.
+            int tran_ret = atomicAdd(&new_work_item.db->numTransactions, 1);
+            // int tran_ret = curr->db->numTransactions;
+            // curr->db->numTransactions += 1;
+            Transaction &newTrans = new_work_item.db->d_transactions[tran_ret];
+
+            // Set the new transaction’s utility.
+            newTrans.utility = oldTrans.utility + oldTrans.data[idx].util;
+            // Set the pointer to the beginning of its block in the flat array.
+            newTrans.data = new_work_item.db->d_data + new_start;
+
+            // Compute total utility by summing the utilities of all suffix items.
+            int total_util = newTrans.utility;
+            for (int j = idx + 1; j < oldTrans.length; j++)
+            {
+                total_util += oldTrans.data[j].util;
+            }
+
+            // Copy the suffix items into the new region.
+            int ret = new_start;
+            for (int j = idx + 1; j < oldTrans.length; j++)
+            {
+                new_work_item.db->d_data[ret++] = oldTrans.data[j];
+                // Update bucket utility.
+                add_bucket_util(local_util, old_work_item.max_item * scale, oldTrans.data[j].key, total_util);
+            }
+            // Record the new transaction's length.
+            newTrans.length = ret - new_start;
+        }
+
+        __syncthreads();
+
+        // if (tid == 0)
         // {
-        //     printf("%d:%d out of %d\n", tid, new_work_item->db->transaction_tracker, item->db->numTransactions);
-        //     __threadfence_system();
+        //     printDatabase(new_work_item.db);
+        //     printf("Local Util:");
+        //     printBucketUtil(local_util, new_work_item.max_item * scale);
         // }
 
+        // if (!curr_work_queue->pop(item))
+        // {
+        //     // printf("TID: %d\tCount: %d\n", tid, curr_work_queue->get_active());
+        //     // __nanosleep(1000);
+        //     continue;
+        // }
+        // // printf("TID: %d\tCount: %d\n", tid, curr_work_queue->get_active());
+        // // printf("TID: %d\tItem: %d\n", tid, item->primary);
+
+        // memset(new_work_item, 0, sizeof(WorkItem));
+
+        // new_work_item->pattern = reinterpret_cast<int *>(mm->malloc((item->pattern_length + 1) * sizeof(int)));
+        // memcpy(new_work_item->pattern, item->pattern, (item->pattern_length) * sizeof(int));
+        // new_work_item->pattern[item->pattern_length] = item->primary;
+        // new_work_item->pattern_length = item->pattern_length + 1;
+
+        // new_work_item->db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
+        // memset(new_work_item->db, 0, sizeof(Database));
+        // new_work_item->db->d_data = reinterpret_cast<Item *>(mm->malloc(item->db->numItems * sizeof(Item)));
+        // new_work_item->db->d_transactions = reinterpret_cast<Transaction *>(mm->malloc(item->db->numTransactions * sizeof(Transaction)));
+
+        // memset(new_work_item->db->d_data, 0, item->db->numItems * sizeof(Item));
+        // memset(new_work_item->db->d_transactions, 0, item->db->numTransactions * sizeof(Transaction));
+
+        // new_work_item->max_item = item->max_item;
+        // Item *local_util = reinterpret_cast<Item *>(mm->malloc(new_work_item->max_item * scale * sizeof(Item)));
+        // memset(local_util, 0, new_work_item->max_item * scale * sizeof(Item));
+        // Item *subtree_util = reinterpret_cast<Item *>(mm->malloc(new_work_item->max_item * scale * sizeof(Item)));
+        // memset(subtree_util, 0, new_work_item->max_item * scale * sizeof(Item));
+
+        // new_work_item->db->transaction_tracker = 0;
+
+        // iterative_project(item, new_work_item, local_util);
+        // // project<<<item->db->numTransactions, 1>>>(item, new_work_item, local_util);
+        // // while(new_work_item->db->transaction_tracker != item->db->numTransactions)
+        // // {
+        // //     printf("%d:%d out of %d\n", tid, new_work_item->db->transaction_tracker, item->db->numTransactions);
+        // //     __threadfence_system();
+        // // }
+
+        __syncthreads();
+
         // if utility is greater than min_util add to high utility patterns
-        if (new_work_item->utility >= min_util)
+        if (tid == 0)
         {
-            add_pattern(new_work_item, d_high_utility_patterns);
+            if (new_work_item.utility >= min_util)
+            {
+                add_pattern(&new_work_item, d_high_utility_patterns);
+            }
+
+            hashes = (int *)(mm->malloc(new_work_item.db->numTransactions * scale * sizeof(int)));
+            memset(hashes, -1, new_work_item.db->numTransactions * sizeof(int) * scale);
+            // new_work_item->work_done = reinterpret_cast<int *>(mm->malloc(sizeof(int)));
+            // printDatabase(new_work_item.db);
+        }
+        __syncthreads();
+
+        // // Loop over each transaction in the current database.
+        // for (int i = tid; i < new_work_item.db->numTransactions; i += blockDim.x)
+        // {
+        //     // Reference to the current transaction.
+        //     Transaction &tran = new_work_item.db->d_transactions[i];
+
+        //     // curr_loc tracks the new (trimmed) position within this transaction.
+        //     int curr_loc = 0;
+        //     // Start with the transaction's current utility.
+        //     int total_tran_util = tran.utility;
+
+        //     // --- Trim Phase ---
+        //     // Iterate over each item in the transaction.
+        //     for (int j = 0; j < tran.length; j++)
+        //     {
+        //         // Find the index into local_util for the key of the current item.
+        //         int idx = find_item(local_util, new_work_item.max_item * scale, tran.data[j].key);
+        //         // If the local utility meets the minimum threshold...
+        //         if (local_util[idx].util >= min_util)
+        //         {
+        //             // Overwrite the current transaction's data in-place.
+        //             // (Assumes tran.data points to a modifiable array.)
+        //             tran.data[curr_loc] = tran.data[j];
+        //             curr_loc++;
+        //             total_tran_util += tran.data[j].util;
+        //         }
+        //     }
+        //     // Update the transaction length to reflect the trimmed items.
+        //     tran.length = curr_loc;
+
+        //     // --- Update Subtree Utility ---
+        //     int temp_util = 0;
+        //     for (int j = 0; j < tran.length; j++)
+        //     {
+        //         // add_bucket_util updates the subtree utility for the given key.
+        //         add_bucket_util(subtree_util, new_work_item.max_item * scale, tran.data[j].key, total_tran_util - temp_util);
+        //         temp_util += tran.data[j].util;
+        //     }
+
+        //     // --- Hashing and Merging ---
+        //     // Compute a hash for the trimmed transaction using its data.
+        //     int hash_idx = items_hasher(tran.data, tran.length, new_work_item.db->numTransactions * scale);
+
+        //     while (true)
+        //     {
+        //         // Try to insert the current transaction index into the hash table.
+        //         int old = atomicCAS(&hashes[hash_idx], -1, tid);
+        //         if (old == -1)
+        //         {
+        //             // Insertion succeeded.
+        //             break;
+        //         }
+        //         // If the slot is occupied and the transactions have the same keys...
+        //         if (sameKey(new_work_item.db, old, tid))
+        //         {
+        //             // If merging with itself, do nothing.
+        //             if (tid == old)
+        //                 break;
+
+        //             // If the transactions have different lengths, try the next hash slot.
+        //             if (new_work_item.db->d_transactions[old].length != tran.length)
+        //             {
+        //                 hash_idx = (hash_idx + 1) % (new_work_item.db->numTransactions * scale);
+        //                 continue;
+        //             }
+        //             // --- Merge Phase ---
+        //             // Merge the two transactions item-by-item.
+        //             Transaction &oldTran = new_work_item.db->d_transactions[old];
+        //             for (int j = 0; j < oldTran.length; j++)
+        //             {
+        //                 // atomicAdd(&oldTran.data[i].util, tran.data[i].util);
+        //                 oldTran.data[j].util += tran.data[j].util;
+        //             }
+        //             // Merge overall utilities.
+        //             atomicAdd(&oldTran.utility, tran.utility);
+        //             // Mark the current transaction as merged by zeroing its fields.
+        //             tran.data = nullptr;
+        //             tran.length = 0;
+        //             tran.utility = 0;
+        //             break;
+        //         }
+        //         // Otherwise, try the next slot in the hash table.
+        //         hash_idx = (hash_idx + 1) % (new_work_item.db->numTransactions * scale);
+        //     }
+
+        //     //     // Update the transaction tracker and ensure memory ordering.
+        //     //     // atomicAdd(&curr->db->transaction_tracker, 1);
+        //     //     // __threadfence_system();
+        // }
+
+        __syncthreads();
+
+        if (tid == 0)
+
+        {
+            iterative_trim_and_merge(&new_work_item, local_util, hashes, subtree_util, min_util);
+
+            // printf("Subtree Util:");
+            // printBucketUtil(subtree_util, new_work_item.max_item * scale);
+            // printDatabase(new_work_item.db);
+
+            max_item = 0;
+            // // go through local util and find number of items greater than min_util
+            // for (int i = 0; i < old_work_item.max_item * scale; i++)
+            // {
+            //     if (local_util[i].util >= min_util)
+            //     {
+            //         max_item++;
+            //     }
+            // }
+
+            primary_count = 0;
+            // for (int i = 0; i < old_work_item.max_item * scale; i++)
+            // {
+            //     if (subtree_util[i].util >= min_util)
+            //     {
+            //         primary_count++;
+            //     }
+            // }
+
+            // new_work_item.max_item = max_item;
+            // for (int i = 0; i < old_work_item.max_item * scale; i++)
+            // {
+            //     if (subtree_util[i].util >= min_util)
+            //     {
+            //         new_work_item.primary = subtree_util[i].key;
+            //         new_work_item.work_count = primary_count;
+            //         curr_work_queue->push(new_work_item);
+            //     }
+            // }
+
+            // curr_work_queue->finish_task();
+        }
+        __syncthreads();
+
+        for (int i = tid; i < old_work_item.max_item * scale; i += blockDim.x)
+        {
+            if (local_util[i].util >= min_util)
+                atomicAdd(&max_item, 1);
+            if (subtree_util[i].util >= min_util)
+                atomicAdd(&primary_count, 1);
         }
 
-        if (new_work_item->db->numTransactions == 0)
-        {
-            // printf("Freeing Memory\n");
-            mm->free(new_work_item->pattern);
-            mm->free(new_work_item->db->d_data);
-            mm->free(new_work_item->db->d_transactions);
-            mm->free(local_util);
-            mm->free(subtree_util);
-            mm->free(new_work_item->work_done);
-            mm->free(new_work_item->db);
+        __syncthreads();
 
-            int ret = atomicAdd(&item->work_done[0], 1);
-            if (ret == (item->work_count - 1))
+        if (tid == 0)
+        {
+            if (primary_count > 0)
+
             {
-                // printf("Freeing Memory\n");
-                mm->free(item->pattern);
-                mm->free(item->db->d_data);
-                mm->free(item->db->d_transactions);
-                mm->free(item->db);
-                mm->free(item->work_done);
+                new_work_item.max_item = max_item;
+                for (int i = 0; i < old_work_item.max_item * scale; i++)
+                {
+                    if (subtree_util[i].util >= min_util)
+                    {
+                        new_work_item.primary = subtree_util[i].key;
+                        new_work_item.work_count = primary_count;
+                        curr_work_queue->push(new_work_item);
+                    }
+                }
             }
 
             curr_work_queue->finish_task();
-
-            continue;
-            // return;
         }
 
-        // trim and merge
-        new_work_item->db->transaction_tracker = 0;
-        int *hashes = (int *)(mm->malloc(new_work_item->db->numTransactions * scale * sizeof(int)));
-        memset(hashes, -1, new_work_item->db->numTransactions * sizeof(int) * scale);
-        new_work_item->work_done = reinterpret_cast<int *>(mm->malloc(sizeof(int)));
+        // if (new_work_item->db->numTransactions == 0)
+        // {
+        //     // printf("Freeing Memory\n");
+        //     mm->free(new_work_item->pattern);
+        //     mm->free(new_work_item->db->d_data);
+        //     mm->free(new_work_item->db->d_transactions);
+        //     mm->free(local_util);
+        //     mm->free(subtree_util);
+        //     mm->free(new_work_item->work_done);
+        //     mm->free(new_work_item->db);
 
-        iterative_trim_and_merge(new_work_item, local_util, hashes, subtree_util, min_util);
+        //     int ret = atomicAdd(&item->work_done[0], 1);
+        //     if (ret == (item->work_count - 1))
+        //     {
+        //         // printf("Freeing Memory\n");
+        //         mm->free(item->pattern);
+        //         mm->free(item->db->d_data);
+        //         mm->free(item->db->d_transactions);
+        //         mm->free(item->db);
+        //         mm->free(item->work_done);
+        //     }
 
-        int max_item = 0;
-        // go through local util and find number of items greater than min_util
-        for (int i = 0; i < item->max_item * scale; i++)
-        {
-            if (local_util[i].util >= min_util)
-            {
-                max_item++;
-            }
-        }
+        //     curr_work_queue->finish_task();
 
-        int primary_count = 0;
-        for (int i = 0; i < item->max_item * scale; i++)
-        {
-            if (subtree_util[i].util >= min_util)
-            {
-                primary_count++;
-            }
-        }
+        //     continue;
+        //     // return;
+        // }
 
-        if (primary_count == 0)
-        {
+        // // trim and merge
+        // new_work_item->db->transaction_tracker = 0;
 
-            mm->free(new_work_item->pattern);
-            mm->free(new_work_item->db->d_data);
-            mm->free(new_work_item->db->d_transactions);
-            mm->free(local_util);
-            mm->free(subtree_util);
-            mm->free(hashes);
-            mm->free(new_work_item->work_done);
-            mm->free(new_work_item->db);
+        // printf("Primary Count: %d\n", primary_count);
+        // printf("Max Item: %d\n", max_item);
 
-            int ret = atomicAdd(&item->work_done[0], 1);
-            if (ret == (item->work_count - 1))
-            {
-                mm->free(item->pattern);
-                mm->free(item->db->d_data);
-                mm->free(item->db->d_transactions);
-                mm->free(item->db);
-                mm->free(item->work_done);
-            }
+        // if (primary_count == 0)
+        // {
 
-            curr_work_queue->finish_task(); 
+        //     mm->free(new_work_item->pattern);
+        //     mm->free(new_work_item->db->d_data);
+        //     mm->free(new_work_item->db->d_transactions);
+        //     mm->free(local_util);
+        //     mm->free(subtree_util);
+        //     mm->free(hashes);
+        //     mm->free(new_work_item->work_done);
+        //     mm->free(new_work_item->db);
 
-            continue;
-            // return;
-        }
+        //     int ret = atomicAdd(&item->work_done[0], 1);
+        //     if (ret == (item->work_count - 1))
+        //     {
+        //         mm->free(item->pattern);
+        //         mm->free(item->db->d_data);
+        //         mm->free(item->db->d_transactions);
+        //         mm->free(item->db);
+        //         mm->free(item->work_done);
+        //     }
 
-        new_work_item->max_item = max_item;
-        for (int i = 0; i < item->max_item * scale; i++)
-        {
-            if (subtree_util[i].util >= min_util)
-            {
-                new_work_item->primary = subtree_util[i].key;
-                new_work_item->work_count = primary_count;
-                curr_work_queue->push(*new_work_item);
-            }
-        }
+        //     curr_work_queue->finish_task();
 
-        // free the memory
-        mm->free(local_util);
-        mm->free(hashes);
-        mm->free(subtree_util);
+        //     continue;
+        //     // return;
+        // }
 
-        int ret = atomicAdd(&item->work_done[0], 1);
-        if (ret == (item->work_count - 1))
-        {
-            mm->free(item->pattern);
-            mm->free(item->db->d_data);
-            mm->free(item->db->d_transactions);
-            mm->free(item->db);
-            mm->free(item->work_done);
-        }
+        // // free the memory
+        // mm->free(local_util);
+        // mm->free(hashes);
+        // mm->free(subtree_util);
 
-        curr_work_queue->finish_task();
-
+        // int ret = atomicAdd(&item->work_done[0], 1);
+        // if (ret == (item->work_count - 1))
+        // {
+        //     mm->free(item->pattern);
+        //     mm->free(item->db->d_data);
+        //     mm->free(item->db->d_transactions);
+        //     mm->free(item->db);
+        //     mm->free(item->work_done);
+        // }
     }
 }

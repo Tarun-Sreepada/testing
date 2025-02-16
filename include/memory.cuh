@@ -72,11 +72,7 @@ struct CudaMemoryManager
     }
 };
 
-//------------------------------------------------------------------------------
-// Host–side helper: createCudaMemoryManager
-//
-// Allocates and initializes a CudaMemoryManager (and its pool) in managed memory.
-//------------------------------------------------------------------------------
+
 __host__ CudaMemoryManager *createCudaMemoryManager(size_t numPages, size_t pageSize)
 {
     cudaError_t err;
