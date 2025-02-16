@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <chrono>
 #include "args.h"     // Include the args parser
 #include "parser.h"   // Include the file reader
 #include "work.cuh"   // Include the work queue
@@ -32,8 +33,8 @@ d e c UTIL: 45
 #define GIGA KILO *MEGA
 
 #define page_size 512
-#define total_memory 4 * GIGA
-#define threads 64
+#define total_memory 29 * GIGA
+#define threads 4096
 //  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 //  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 
@@ -238,10 +239,15 @@ int main(int argc, char *argv[])
 
     // cudaError_t cudaStatus = cudaGetLastError();
     printf("Top: %d\n", curr_work_queue->active);
+    auto starttime = std::chrono::high_resolution_clock::now();
 
     test<<<threads, 1>>>(curr_work_queue, d_high_utility_patterns, mm, args.utility);
     cudaDeviceSynchronize();
     printf("Top: %d\n", curr_work_queue->active);
+
+    auto endtime = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count() / 1000 << " s\n";
 
 
     // while (curr_work_queue->active > 0)

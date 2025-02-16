@@ -122,7 +122,8 @@ __global__ void project(WorkItem *old, WorkItem *curr, Item *local_util)
         // Record the new transaction's length.
         newTrans.length = ret - new_start;
 
-        atomicAdd(&curr->db->transaction_tracker, 1);
+        // printf("%d\n",atomicAdd(&curr->db->transaction_tracker, 1));
+        __threadfence();
     }
 }
 
@@ -389,8 +390,7 @@ __device__ void iterative_trim_and_merge(WorkItem *curr,
 
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
-    int count = atomicAdd(&high_utility_patterns[0], 1);
-    // printf("Pattern Count:%d\tUtility:%d\tLast Item:%d\n", count, wi->utility, wi->pattern[wi->pattern_length - 1]);
+    printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -409,7 +409,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
     WorkItem *item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
     WorkItem *new_work_item = reinterpret_cast<WorkItem *>(mm->malloc(sizeof(WorkItem)));
 
-    // int tid = blockIdx.x;
+    int tid = blockIdx.x;
 
     while (curr_work_queue->get_active() > 0)
     {
@@ -450,7 +450,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
         // project<<<item->db->numTransactions, 1>>>(item, new_work_item, local_util);
         // while(new_work_item->db->transaction_tracker != item->db->numTransactions)
         // {
-        //     // printf("Waiting\n");
+        //     printf("%d:%d out of %d\n", tid, new_work_item->db->transaction_tracker, item->db->numTransactions);
         //     __threadfence_system();
         // }
 
