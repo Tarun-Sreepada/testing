@@ -182,16 +182,14 @@ int main(int argc, char *argv[])
     // mm.initialize(0, 1024 * 1024 * 1024);
 
     CudaMemoryManager *mm = createCudaMemoryManager(total_memory / page_size, page_size);
+    AtomicWorkStack *curr_work_queue;
+    cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
+    curr_work_queue->init();
 
-    Item *d_items;
-    int *d_start;
-    int *d_end;
-    int *d_primary;
-
-    cudaMalloc(&d_items, items.size() * sizeof(Item));
-    cudaMalloc(&d_start, start.size() * sizeof(int));
-    cudaMalloc(&d_end, end.size() * sizeof(int));
-    cudaMalloc(&d_primary, primary.size() * sizeof(int));
+    Item *d_items = reinterpret_cast<Item*>(mm->host_malloc(items.size() * sizeof(Item)));
+    int *d_start = reinterpret_cast<int*>(mm->host_malloc(start.size() * sizeof(int)));
+    int *d_end = reinterpret_cast<int*>(mm->host_malloc(end.size() * sizeof(int)));
+    int *d_primary = reinterpret_cast<int*>(mm->host_malloc(primary.size() * sizeof(int)));
 
     // copy items to device
     cudaMemcpy(d_items, items.data(), items.size() * sizeof(Item), cudaMemcpyHostToDevice);
@@ -199,11 +197,53 @@ int main(int argc, char *argv[])
     cudaMemcpy(d_end, end.data(), end.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
+    for (int i = 0; i < primary.size(); i++)
+    {
+        WorkItem work_item;
+        work_item.pattern = (int *)mm->host_malloc(sizeof(int));
+        work_item.pattern_length = 0;
+
+        work_item.db = (Database *)mm->host_malloc(sizeof(Database));
+        work_item.db->numItems = items.size();
+
+        work_item.db->d_data = (Item *)mm->host_malloc(items.size() * sizeof(Item));
+        memcpy(work_item.db->d_data, d_items, items.size() * sizeof(Item));
+
+        // work_item.db->d_transactions = reinterpret_cast<Transaction *>(mm.hostMalloc(start.size() * sizeof(Transaction)));
+        work_item.db->d_transactions = (Transaction *)mm->host_malloc(start.size() * sizeof(Transaction));
+        work_item.db->numTransactions = start.size();
+        for (int i = 0; i < start.size(); i++)
+        {
+            work_item.db->d_transactions[i].data = work_item.db->d_data + d_start[i];
+            work_item.db->d_transactions[i].utility = 0;
+            work_item.db->d_transactions[i].length = d_end[i] - d_start[i];
+        }
+
+        work_item.db->numItems = items.size();
+
+        // work_item.work_done = reinterpret_cast<int *>(mm.hostMalloc(sizeof(int)));
+        work_item.work_done = (int *)mm->host_malloc(sizeof(int));
+        work_item.work_count = primary.size();
+        work_item.max_item = max_item;
+
+        work_item.primary = d_primary[i];
+        curr_work_queue->host_push(work_item);
+    }
+
+    // cudaMalloc(&d_items, items.size() * sizeof(Item));
+    // cudaMalloc(&d_start, start.size() * sizeof(int));
+    // cudaMalloc(&d_end, end.size() * sizeof(int));
+    // cudaMalloc(&d_primary, primary.size() * sizeof(int));
+
+    // // copy items to device
+    // cudaMemcpy(d_items, items.data(), items.size() * sizeof(Item), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_start, start.data(), start.size() * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_end, end.data(), end.size() * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
+
     // AtomicWorkStack *curr_work_queue;
     // cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
-    AtomicWorkStack *curr_work_queue;
-    cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
-    curr_work_queue->init();
+
     // allocate as many work queues as there are primary items
     // cudaMallocManaged(&curr_work_queue, primary.size() * sizeof(AtomicWorkStack));
     // for (int i = 0; i < primary.size(); i++)
@@ -213,13 +253,13 @@ int main(int argc, char *argv[])
     // }
 
 
-    copy<<<1,1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
-    cudaDeviceSynchronize();
+    // copy<<<1,1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
+    // cudaDeviceSynchronize();
 
-    cudaFree(d_items);
-    cudaFree(d_start);
-    cudaFree(d_end);
-    cudaFree(d_primary);
+    // cudaFree(d_items);
+    // cudaFree(d_start);
+    // cudaFree(d_end);
+    // cudaFree(d_primary);
 
 
     // cudaError_t cudaStatus = cudaGetLastError();

@@ -6,11 +6,6 @@
 #include "memory.cuh" // Include the memory manager
 #include "mine.cuh"
 
-#include "device/Ouroboros_impl.cuh"
-#include "device/MemoryInitialization.cuh"
-#include "InstanceDefinitions.cuh"
-#include "Utility.h"
-
 #define scale 2
 
 __device__ void add_bucket_util(Item *local_util, int table_size, int key, int total_util)
@@ -64,29 +59,21 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
     __shared__ int item;
 
     __shared__ int *hashes;
-    // __shared__ bool started;
-    // started = true;
 
     int bid = blockIdx.x;
     int tid = threadIdx.x;
-    // printf("Block: %d\tThread: %d\n", bid, tid);
 
     __shared__ bool popped;
 
     __shared__ int max_item;
-    // int max_item = 0;
 
     __shared__ int primary_count;
-    // int primary_count = 0;
 
     while (curr_work_queue->get_active() > 0)
     {
         if (tid == 0)
         {
-            // curr_work_queue->pop(item);
             popped = curr_work_queue->pop(&old_work_item);
-            // if (popped) started = false;
-            // printf("BID: %d TID %d is popping\tActive:%d\n", bid, tid, curr_work_queue->get_active());
         }
 
         __syncthreads();
@@ -95,11 +82,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
         {
             continue; // skip
         }
-        // printf("TID: %d\tPrimary: %d\n", tid, old_work_item.primary);
 
         if (tid == 0)
         {
-            // printf("Primary: %d\n", old_work_item.primary);
             item = old_work_item.primary;
 
             memset(&new_work_item, 0, sizeof(WorkItem));
@@ -123,11 +108,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
             subtree_util = reinterpret_cast<Item *>(mm->malloc(new_work_item.max_item * scale * sizeof(Item)));
             memset(subtree_util, 0, new_work_item.max_item * scale * sizeof(Item));
 
-            // started = true;
         }
 
         __syncthreads();
-
 
         // Iterate over all transactions in the old database.
         for (int i = tid; i < old_work_item.db->numTransactions; i += blockDim.x)
@@ -151,16 +134,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
                 continue;
             }
 
-            // Reserve space in the current (flat) data array.
-            // Record the starting index for the new transaction’s data.
-            // int new_start = curr->db->numItems;
-            // curr->db->numItems += items_this_trans;
             int new_start = atomicAdd(&new_work_item.db->numItems, items_this_trans);
 
             // Create a new transaction in curr->db.
             int tran_ret = atomicAdd(&new_work_item.db->numTransactions, 1);
-            // int tran_ret = curr->db->numTransactions;
-            // curr->db->numTransactions += 1;
             Transaction &newTrans = new_work_item.db->d_transactions[tran_ret];
 
             // Set the new transaction’s utility.
@@ -199,10 +176,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
 
             hashes = (int *)(mm->malloc(new_work_item.db->numTransactions * scale * sizeof(int)));
             memset(hashes, -1, new_work_item.db->numTransactions * sizeof(int) * scale);
-            // new_work_item->work_done = reinterpret_cast<int *>(mm->malloc(sizeof(int)));
-            // printDatabase(new_work_item.db);
             max_item = 0;
             primary_count = 0;
+            
+            // new_work_item.db->transaction_tracker = 0;
         }
         __syncthreads();
 
@@ -212,7 +189,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
             // Reference to the current transaction.
             Transaction &tran = new_work_item.db->d_transactions[i];
 
-        //     // curr_loc tracks the new (trimmed) position within this transaction.
+            //     // curr_loc tracks the new (trimmed) position within this transaction.
             int curr_loc = 0;
             // Start with the transaction's current utility.
             int total_tran_util = tran.utility;
@@ -291,11 +268,23 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
                 // Otherwise, try the next slot in the hash table.
                 hash_idx = (hash_idx + 1) % (new_work_item.db->numTransactions * scale);
             }
-
         }
 
-
         __syncthreads();
+
+        // // push up all transactions so we can reduce search space
+        // for (int i = tid; i < new_work_item.db->numTransactions; i += blockDim.x)
+        // {
+        //     Transaction tran = new_work_item.db->d_transactions[i];
+        //     if (new_work_item.db->d_transactions[i].length != 0 && tran.data != nullptr && tran.utility != 0) // if it has something
+        //     {
+        //         int ret = atomicAdd(&new_work_item.db->transaction_tracker, 1);
+        //         new_work_item.db->d_transactions[ret] = tran;
+        //         // new_work_item.db->d_transactions[new_work_item.db->transaction_tracker] = new_work_item.db->d_transactions[i];
+        //         // new_work_item.db->transaction_tracker++;
+        //     }
+        // }
+
 
         for (int i = tid; i < old_work_item.max_item * scale; i += blockDim.x)
         {
@@ -308,6 +297,8 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
         __syncthreads();
         if (primary_count == 0)
         {
+            // new_work_item.db->numTransactions = new_work_item.db->transaction_tracker;
+
             if (tid == 0)
             {
                 curr_work_queue->finish_task();
@@ -317,7 +308,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue, int32_t *d_high_utility_p
 
         if (tid == 0)
         {
-   
+
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
 

@@ -24,7 +24,7 @@ add_executable(${PROJECT_NAME} main.cu ${SRC_FILES})
 # Include directories for your project and ouroboros
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/external/Ouroboros/include
+    # ${PROJECT_SOURCE_DIR}/external/Ouroboros/include
 )
 
 # Add debugging flags for compute-sanitizer

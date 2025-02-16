@@ -61,11 +61,41 @@ struct CudaMemoryManager
         return blockPtr + sizeof(AllocationHeader);
     }
 
-    //--------------------------------------------------------------------------
-    // Device–side free function.
-    //
-    // For this bump allocator, free does nothing.
-    //--------------------------------------------------------------------------
+    __host__ void *host_malloc(size_t bytes)
+    {
+        size_t totalBytes = bytes + sizeof(AllocationHeader);
+        size_t pagesNeeded = (totalBytes + pageSize - 1) / pageSize;
+
+        if (pagesNeeded > numPages)
+            return nullptr;
+
+        int oldPages, newPages;
+
+        while (true)
+        {
+            oldPages = pagesAllocated;
+            if (oldPages + pagesNeeded > numPages)
+            {
+                newPages = pagesNeeded;
+            }
+            else
+            {
+                newPages = oldPages + pagesNeeded;
+            }
+
+            if (__sync_bool_compare_and_swap(&pagesAllocated, oldPages, newPages))
+                break;
+        }
+
+        int allocStart = (oldPages + pagesNeeded > numPages) ? 0 : oldPages;
+        char *blockPtr = (char *)pool + allocStart * pageSize;
+
+        AllocationHeader *header = (AllocationHeader *)blockPtr;
+        header->pagesUsed = pagesNeeded;
+
+        return blockPtr + sizeof(AllocationHeader);
+    }
+
     __device__ void free(void * /*ptr*/)
     {
         // No-op: individual frees are not supported in a bump allocator.

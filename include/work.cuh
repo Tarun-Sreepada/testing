@@ -71,6 +71,17 @@ struct AtomicWorkStack {
         return success;
     }
 
+    __host__ bool host_push(WorkItem item) {
+        bool success = false;
+        if ((rear + 1) % CAPACITY != front) {  // Check if queue is not full
+            items[rear] = item;
+            rear = (rear + 1) % CAPACITY;
+            active += 1;
+            success = true;
+        }
+        return success;
+    }
+
     // Dequeue a work item
     __device__ bool pop(WorkItem *item) {
         bool success = false;
@@ -82,6 +93,16 @@ struct AtomicWorkStack {
             success = true;
         }
         release_lock();
+        return success;
+    }
+
+    __host__ bool host_pop(WorkItem *item) {
+        bool success = false;
+        if (front != rear) {  // Check if queue is not empty
+            *item = items[front];
+            front = (front + 1) % CAPACITY;
+            success = true;
+        }
         return success;
     }
 

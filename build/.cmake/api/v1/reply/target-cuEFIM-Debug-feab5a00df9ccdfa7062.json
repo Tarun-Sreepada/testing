@@ -81,10 +81,6 @@
 				{
 					"backtrace" : 3,
 					"path" : "/home/tarun/testing/include"
-				},
-				{
-					"backtrace" : 3,
-					"path" : "/home/tarun/testing/external/Ouroboros/include"
 				}
 			],
 			"language" : "CUDA",
@@ -122,10 +118,6 @@
 				{
 					"backtrace" : 3,
 					"path" : "/home/tarun/testing/include"
-				},
-				{
-					"backtrace" : 3,
-					"path" : "/home/tarun/testing/external/Ouroboros/include"
 				}
 			],
 			"language" : "CXX",
