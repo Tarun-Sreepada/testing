@@ -35,8 +35,8 @@ d e c UTIL: 45
 #define page_size 512
 #define total_memory 24 * GIGA
 
-#define blocks 512
-#define threads 16
+#define blocks 1024
+#define threads 128
 //  1959  make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 //  1960  make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 
