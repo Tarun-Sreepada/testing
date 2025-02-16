@@ -151,6 +151,7 @@ int main(int argc, char *argv[])
     // Access the parsed data
     auto &filteredTransactions = fileResult.filteredTransactions;
     auto &primary = fileResult.primary;
+    std::cout << "Num primary: " << primary.size() << "\n";
     auto &rename = fileResult.rename;
     int max_item = fileResult.max_item;
 
@@ -171,6 +172,7 @@ int main(int argc, char *argv[])
         end.push_back(items.size());
     }
     // std::cout << "\n";
+
 
     int32_t *d_high_utility_patterns;
     cudaMallocManaged(&d_high_utility_patterns, 128 * MEGA);
