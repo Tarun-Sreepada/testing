@@ -118,8 +118,6 @@ __global__ void copy(Item *d_items, int *d_start, int *d_end, int *d_primary, in
         // curr_work_queue[i]->push(work_item);
         curr_work_queue->push(work_item);
     }
-
-
 }
 
 int main(int argc, char *argv[])
@@ -173,7 +171,6 @@ int main(int argc, char *argv[])
     }
     // std::cout << "\n";
 
-
     int32_t *d_high_utility_patterns;
     cudaMallocManaged(&d_high_utility_patterns, 128 * MEGA);
     memset(d_high_utility_patterns, 0, 128 * MEGA);
@@ -188,10 +185,10 @@ int main(int argc, char *argv[])
     cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
     curr_work_queue->init();
 
-    Item *d_items = reinterpret_cast<Item*>(mm->host_malloc(items.size() * sizeof(Item)));
-    int *d_start = reinterpret_cast<int*>(mm->host_malloc(start.size() * sizeof(int)));
-    int *d_end = reinterpret_cast<int*>(mm->host_malloc(end.size() * sizeof(int)));
-    int *d_primary = reinterpret_cast<int*>(mm->host_malloc(primary.size() * sizeof(int)));
+    Item *d_items = reinterpret_cast<Item *>(mm->host_malloc(items.size() * sizeof(Item)));
+    int *d_start = reinterpret_cast<int *>(mm->host_malloc(start.size() * sizeof(int)));
+    int *d_end = reinterpret_cast<int *>(mm->host_malloc(end.size() * sizeof(int)));
+    int *d_primary = reinterpret_cast<int *>(mm->host_malloc(primary.size() * sizeof(int)));
 
     // copy items to device
     cudaMemcpy(d_items, items.data(), items.size() * sizeof(Item), cudaMemcpyHostToDevice);
@@ -199,34 +196,35 @@ int main(int argc, char *argv[])
     cudaMemcpy(d_end, end.data(), end.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
+    WorkItem work_item;
+    work_item.pattern = (int *)mm->host_malloc(sizeof(int));
+    work_item.pattern_length = 0;
+
+    work_item.db = (Database *)mm->host_malloc(sizeof(Database));
+    work_item.db->numItems = items.size();
+
+    work_item.db->d_data = (Item *)mm->host_malloc(items.size() * sizeof(Item));
+    memcpy(work_item.db->d_data, d_items, items.size() * sizeof(Item));
+
+    // work_item.db->d_transactions = reinterpret_cast<Transaction *>(mm.hostMalloc(start.size() * sizeof(Transaction)));
+    work_item.db->d_transactions = (Transaction *)mm->host_malloc(start.size() * sizeof(Transaction));
+    work_item.db->numTransactions = start.size();
+    for (int i = 0; i < start.size(); i++)
+    {
+        work_item.db->d_transactions[i].data = work_item.db->d_data + d_start[i];
+        work_item.db->d_transactions[i].utility = 0;
+        work_item.db->d_transactions[i].length = d_end[i] - d_start[i];
+    }
+
+    work_item.db->numItems = items.size();
+
+    // work_item.work_done = reinterpret_cast<int *>(mm.hostMalloc(sizeof(int)));
+    work_item.work_done = (int *)mm->host_malloc(sizeof(int));
+    work_item.work_count = primary.size();
+    work_item.max_item = max_item;
+
     for (int i = 0; i < primary.size(); i++)
     {
-        WorkItem work_item;
-        work_item.pattern = (int *)mm->host_malloc(sizeof(int));
-        work_item.pattern_length = 0;
-
-        work_item.db = (Database *)mm->host_malloc(sizeof(Database));
-        work_item.db->numItems = items.size();
-
-        work_item.db->d_data = (Item *)mm->host_malloc(items.size() * sizeof(Item));
-        memcpy(work_item.db->d_data, d_items, items.size() * sizeof(Item));
-
-        // work_item.db->d_transactions = reinterpret_cast<Transaction *>(mm.hostMalloc(start.size() * sizeof(Transaction)));
-        work_item.db->d_transactions = (Transaction *)mm->host_malloc(start.size() * sizeof(Transaction));
-        work_item.db->numTransactions = start.size();
-        for (int i = 0; i < start.size(); i++)
-        {
-            work_item.db->d_transactions[i].data = work_item.db->d_data + d_start[i];
-            work_item.db->d_transactions[i].utility = 0;
-            work_item.db->d_transactions[i].length = d_end[i] - d_start[i];
-        }
-
-        work_item.db->numItems = items.size();
-
-        // work_item.work_done = reinterpret_cast<int *>(mm.hostMalloc(sizeof(int)));
-        work_item.work_done = (int *)mm->host_malloc(sizeof(int));
-        work_item.work_count = primary.size();
-        work_item.max_item = max_item;
 
         work_item.primary = d_primary[i];
         curr_work_queue->host_push(work_item);
@@ -254,7 +252,6 @@ int main(int argc, char *argv[])
     //     curr_work_queue[i]->init();
     // }
 
-
     // copy<<<1,1>>>(d_items, d_start, d_end, d_primary, items.size(), start.size(), primary.size(), max_item, d_high_utility_patterns, mm, curr_work_queue, args.utility);
     // cudaDeviceSynchronize();
 
@@ -262,7 +259,6 @@ int main(int argc, char *argv[])
     // cudaFree(d_start);
     // cudaFree(d_end);
     // cudaFree(d_primary);
-
 
     // cudaError_t cudaStatus = cudaGetLastError();
     printf("Top: %d\n", curr_work_queue->active);
@@ -274,13 +270,12 @@ int main(int argc, char *argv[])
 
     auto endtime = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Elapsed time: " << std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count() / 1000.0 << " s\n";
-
+    std::cout << "GPU time: " << std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count() / 1000.0 << " s\n";
 
     // while (curr_work_queue->active > 0)
     {
         // curr_work_queue->top
-        
+
         //     cudaStatus = cudaGetLastError();
         //     if (cudaStatus != cudaSuccess)
         //     {
