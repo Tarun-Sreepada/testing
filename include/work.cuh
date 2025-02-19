@@ -2,7 +2,7 @@
 #include <cstdint>
 #include "database.cuh"
 
-#define CAPACITY (32 * 1024)
+#define CAPACITY (1024 * 1024)
 
 
 struct WorkItem {
@@ -26,22 +26,19 @@ struct WorkItem {
 
 struct AtomicWorkStack {
     WorkItem items[CAPACITY];
-    volatile unsigned int front;
-    volatile unsigned int rear;
-    volatile unsigned int active;  // Keeps track of active tasks
-    int lock;  // 0 = unlocked, 1 = locked
+    volatile unsigned int top;    // Points to the next free slot
+    volatile unsigned int active; // Keeps track of active tasks
+    int lock;                     // 0 = unlocked, 1 = locked
 
     __device__ __host__ void init() {
-        front = 0;
-        rear = 0;
+        top = 0;
         active = 0;
         lock = 0;
         memset(items, 0, sizeof(items));
     }
 
     __host__ void init_host() {
-        front = 0;
-        rear = 0;
+        top = 0;
         active = 0;
         lock = 0;
     }
@@ -57,13 +54,14 @@ struct AtomicWorkStack {
         atomicExch(&lock, 0);
     }
 
-    // Enqueue a work item (FIFO)
+    // Push a work item onto the stack (LIFO)
     __device__ bool push(WorkItem item) {
         bool success = false;
         acquire_lock();
-        if ((rear + 1) % CAPACITY != front) {  // Check if queue is not full
-            items[rear] = item;
-            rear = (rear + 1) % CAPACITY;
+        if (top < CAPACITY) {  // Check if stack is not full
+            items[top] = item;
+            top++;
+            __threadfence();  // Ensure memory ordering
             atomicAdd((unsigned int *)&active, 1);
             success = true;
         }
@@ -73,23 +71,23 @@ struct AtomicWorkStack {
 
     __host__ bool host_push(WorkItem item) {
         bool success = false;
-        if ((rear + 1) % CAPACITY != front) {  // Check if queue is not full
-            items[rear] = item;
-            rear = (rear + 1) % CAPACITY;
-            active += 1;
+        if (top < CAPACITY) {  // Check if stack is not full
+            items[top] = item;
+            top++;
+            active = active + 1;
             success = true;
         }
         return success;
     }
 
-    // Dequeue a work item
+    // Pop a work item from the stack (LIFO)
     __device__ bool pop(WorkItem *item) {
         bool success = false;
         acquire_lock();
-        if (front != rear) {  // Check if queue is not empty
-            *item = items[front];
-            front = (front + 1) % CAPACITY;
-            __threadfence();
+        if (top > 0) {  // Check if stack is not empty
+            top = top - 1;
+            *item = items[top];
+            __threadfence();  // Ensure memory ordering
             success = true;
         }
         release_lock();
@@ -98,9 +96,9 @@ struct AtomicWorkStack {
 
     __host__ bool host_pop(WorkItem *item) {
         bool success = false;
-        if (front != rear) {  // Check if queue is not empty
-            *item = items[front];
-            front = (front + 1) % CAPACITY;
+        if (top > 0) {  // Check if stack is not empty
+            top = top - 1;
+            *item = items[top];
             success = true;
         }
         return success;

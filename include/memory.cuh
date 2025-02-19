@@ -77,6 +77,7 @@ struct CudaMemoryManager
             if (oldPages + pagesNeeded > numPages)
             {
                 newPages = pagesNeeded;
+                printf("Not enough room at the end; wrap around to the beginning.\n");
             }
             else
             {

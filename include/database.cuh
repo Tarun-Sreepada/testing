@@ -23,10 +23,15 @@ __device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
 {
     uint32_t hash = 0;
     for (int i = 0; i < n; i++)
-        hash ^= pcg_hash(items[i].key);
+        hash ^= pcg_hash(items[i].key + i);
     return hash % tableSize;
 }
 
+/*
+Item *items: array of items
+int n: size of the array
+int key: key to search
+*/
 __device__ int find_item(const Item *items, int n, int key)
 {
     uint32_t hash = hashFunction(key, n);
