@@ -59,7 +59,7 @@ __device__ void add_bucket_util(Item *local_util, int table_size, int key, int t
 
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
-    printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
+    // printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -78,6 +78,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                      CudaMemoryManager *mm,
                      int min_util)
 {
+    const int bid = blockIdx.x;
     const int tid = threadIdx.x;
     // Use shared memory only for values that one block will process together.
     __shared__ WorkItem work_item; // the work-item popped from the queue
@@ -101,7 +102,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (1) Only thread 0 pops from the work queue.
         if (tid == 0)
         {
-            // printf("Active:%d\n", curr_work_queue->get_active());
             s_popped = curr_work_queue->pop(&work_item);
         }
         __syncthreads();
@@ -116,6 +116,8 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (2) Thread 0 initializes the new work item.
         if (tid == 0)
         {
+            // printf("Primary: %d\n", work_item.primary);
+            // printf("Pattern Length: %d\n", work_item.pattern_length);
             memset(&new_work_item, 0, sizeof(WorkItem));
             new_work_item.utility = 0;
             // Allocate and copy the pattern
@@ -126,12 +128,17 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                    work_item.pattern_length * sizeof(int));
             new_work_item.pattern[work_item.pattern_length] = work_item.primary;
             new_work_item.pattern_length = work_item.pattern_length + 1;
-        }
-        __syncthreads();
 
-        // (3) Allocate per–work-item arrays.
-        if (tid == 0)
-        {
+            // printPattern(&new_work_item);
+            // printf("Old database\n");
+            // printf("NumTransactions: %d\n", work_item.db->numTransactions);
+            // for (int i = 0; i < work_item.db->numTransactions; i++)
+            // {
+            //     Transaction &tran = work_item.db->d_transactions[i];
+            //     printf("Utility: %d\tLength: %d\tStart: %p\n", tran.utility, tran.length, tran.data);
+            // }
+            // printDatabase(work_item.db);
+
             num_items = 0;
             num_transactions = 0;
             local_util = reinterpret_cast<Item *>(
@@ -189,8 +196,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
         // --- Add this block ---
         // All threads wait, then thread 0 checks if the pattern qualifies:
-        if (tid == 0) {
-            if (new_work_item.utility >= min_util) {
+        if (tid == 0)
+        {
+            if (new_work_item.utility >= min_util)
+            {
                 add_pattern(&new_work_item, d_high_utility_patterns);
             }
         }
@@ -199,13 +208,13 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // Now handle the case when there are no surviving transactions:
         if (num_transactions == 0)
         {
-            if (tid == 0) {
+            if (tid == 0)
+            {
                 curr_work_queue->finish_task();
             }
             __syncthreads();
             continue;
         }
-
 
         // (6) Allocate memory for the new database in new_work_item.
         if (tid == 0)
@@ -323,6 +332,20 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (11) Compact the transactions array (this step is done serially by thread 0).
         if (tid == 0)
         {
+            // printf("New database\n");
+            // printDatabase(new_work_item.db);
+            // for (int i = 0; i < new_work_item.db->numTransactions; i++)
+            // {
+            //     Transaction &tran = new_work_item.db->d_transactions[i];
+            //     printf("Utility: %d\tLength: %d\tStart: %p\n", tran.utility, tran.length, tran.data);
+            //     // printf("%d|", tran.utility);
+            //     // for (int j = 0; j < tran.length; j++)
+            //     // {
+            //     //     printf("%d:%d ", tran.data[j].key, tran.data[j].util);
+            //     // }
+            //     // printf("\n");
+            // }
+
             int compact_index = 0;
             for (int i = 0; i < new_work_item.db->numTransactions; i++)
             {

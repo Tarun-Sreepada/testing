@@ -60,7 +60,7 @@ struct AtomicWorkStack {
         acquire_lock();
         if (top < CAPACITY) {  // Check if stack is not full
             items[top] = item;
-            top++;
+            top = top + 1;
             __threadfence();  // Ensure memory ordering
             atomicAdd((unsigned int *)&active, 1);
             success = true;
@@ -73,7 +73,7 @@ struct AtomicWorkStack {
         bool success = false;
         if (top < CAPACITY) {  // Check if stack is not full
             items[top] = item;
-            top++;
+            top = top + 1;
             active = active + 1;
             success = true;
         }

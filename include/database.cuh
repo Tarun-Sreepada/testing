@@ -58,13 +58,10 @@ struct Transaction
 
     // Allow treating the transaction like an array.
     __device__ __host__ Item &operator[](int i) { return data[i]; }
-    __device__ __host__ const Item &operator[](int i) const { return data[i]; }
     
     __device__ __host__ Item *operator->() { return data; }
-    __device__ __host__ const Item *operator->() const { return data; }
     
     __device__ __host__ Item *get() { return data; }
-    __device__ __host__ const Item *get() const { return data; }
 
     // Binary search for a given key in this transaction.
     __device__ int findItem(uint32_t search_id) const
@@ -106,7 +103,7 @@ struct Database
     }
 };
 
-__device__ void printDatabase(const Database *db)
+__device__ __host__ void printDatabase(const Database *db)
 {
     if (!db) {
         printf("Database pointer is NULL!\n");
