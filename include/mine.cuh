@@ -59,7 +59,7 @@ __device__ void add_bucket_util(Item *local_util, int table_size, int key, int t
 
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
-    // printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
+    printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -75,7 +75,6 @@ __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 
 __global__ void test(AtomicWorkStack *curr_work_queue,
                      int32_t *d_high_utility_patterns,
-                     CudaMemoryManager *mm,
                      int min_util)
 {
     const int bid = blockIdx.x;
@@ -116,36 +115,24 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (2) Thread 0 initializes the new work item.
         if (tid == 0)
         {
-            // printf("Primary: %d\n", work_item.primary);
-            // printf("Pattern Length: %d\n", work_item.pattern_length);
             memset(&new_work_item, 0, sizeof(WorkItem));
             new_work_item.utility = 0;
             // Allocate and copy the pattern
             new_work_item.pattern = reinterpret_cast<int *>(
-                mm->malloc((work_item.pattern_length + 1) * sizeof(int)));
+                global_malloc((work_item.pattern_length + 1) * sizeof(int)));
             memcpy(new_work_item.pattern,
                    work_item.pattern,
                    work_item.pattern_length * sizeof(int));
             new_work_item.pattern[work_item.pattern_length] = work_item.primary;
             new_work_item.pattern_length = work_item.pattern_length + 1;
 
-            // printPattern(&new_work_item);
-            // printf("Old database\n");
-            // printf("NumTransactions: %d\n", work_item.db->numTransactions);
-            // for (int i = 0; i < work_item.db->numTransactions; i++)
-            // {
-            //     Transaction &tran = work_item.db->d_transactions[i];
-            //     printf("Utility: %d\tLength: %d\tStart: %p\n", tran.utility, tran.length, tran.data);
-            // }
-            // printDatabase(work_item.db);
-
             num_items = 0;
             num_transactions = 0;
             local_util = reinterpret_cast<Item *>(
-                mm->malloc(work_item.max_item * scale * sizeof(Item)));
+                global_malloc(work_item.max_item * scale * sizeof(Item)));
             memset(local_util, 0, work_item.max_item * scale * sizeof(Item));
             temp_transaction = reinterpret_cast<Transaction *>(
-                mm->malloc(work_item.db->numTransactions * sizeof(Transaction)));
+                global_malloc(work_item.db->numTransactions * sizeof(Transaction)));
             memset(temp_transaction, 0, work_item.db->numTransactions * sizeof(Transaction));
         }
         __syncthreads();
@@ -211,6 +198,23 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             if (tid == 0)
             {
                 curr_work_queue->finish_task();
+
+                // Free allocated memory here if necessary.
+                global_free(local_util);
+                global_free(temp_transaction);
+
+                // Free the pattern.
+                global_free(new_work_item.pattern);
+
+                int ret = atomicAdd(&work_item.work_done[0], 1);
+                if (ret == work_item.work_count - 1)
+                {
+                    global_free(work_item.work_done);
+                    global_free(work_item.pattern);
+                    global_free(work_item.db->d_data);
+                    global_free(work_item.db->d_transactions);
+                    global_free(work_item.db);
+                }
             }
             __syncthreads();
             continue;
@@ -219,10 +223,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (6) Allocate memory for the new database in new_work_item.
         if (tid == 0)
         {
-            new_work_item.db = reinterpret_cast<Database *>(mm->malloc(sizeof(Database)));
-            new_work_item.db->d_data = reinterpret_cast<Item *>(mm->malloc(num_items * sizeof(Item)));
+            new_work_item.db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
+            new_work_item.db->d_data = reinterpret_cast<Item *>(global_malloc(num_items * sizeof(Item)));
             new_work_item.db->d_transactions = reinterpret_cast<Transaction *>(
-                mm->malloc(num_transactions * sizeof(Transaction)));
+                global_malloc(num_transactions * sizeof(Transaction)));
             new_work_item.db->numItems = 0;
             new_work_item.db->numTransactions = 0;
         }
@@ -234,10 +238,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             max_item = 0;
             primary_count = 0;
             hashes = reinterpret_cast<int *>(
-                mm->malloc(num_transactions * scale * sizeof(int)));
+                global_malloc(num_transactions * scale * sizeof(int)));
             memset(hashes, -1, num_transactions * scale * sizeof(int));
             subtree_util = reinterpret_cast<Item *>(
-                mm->malloc(work_item.max_item * scale * sizeof(Item)));
+                global_malloc(work_item.max_item * scale * sizeof(Item)));
             memset(subtree_util, 0, work_item.max_item * scale * sizeof(Item));
         }
         __syncthreads();
@@ -346,6 +350,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             //     // printf("\n");
             // }
 
+
             int compact_index = 0;
             for (int i = 0; i < new_work_item.db->numTransactions; i++)
             {
@@ -358,6 +363,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             new_work_item.db->numTransactions = compact_index;
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
+            new_work_item.work_done = reinterpret_cast<int *>(
+                global_malloc(sizeof(int)));
+            new_work_item.work_done[0] = 0;
             // (12) For every surviving primary in subtree_util, push a new work-item.
             for (int i = 0; i < work_item.max_item * scale; i++)
             {
@@ -368,6 +376,27 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 }
             }
             curr_work_queue->finish_task();
+
+
+            // Free allocated memory here if necessary.
+            global_free(local_util);
+            global_free(temp_transaction);
+            global_free(hashes);
+            global_free(subtree_util);
+
+
+            int ret = atomicAdd(&work_item.work_done[0], 1);
+
+
+            if (ret == (work_item.work_count - 1))
+            {
+                
+                global_free(work_item.work_done);
+                global_free(work_item.pattern);
+                global_free(work_item.db->d_data);
+                global_free(work_item.db->d_transactions);
+                global_free(work_item.db);
+            }
         }
         __syncthreads();
 

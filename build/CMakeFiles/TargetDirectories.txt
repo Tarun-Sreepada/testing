@@ -1,3 +1,5 @@
 /home/tarun/testing/build/CMakeFiles/cuEFIM.dir
 /home/tarun/testing/build/CMakeFiles/edit_cache.dir
 /home/tarun/testing/build/CMakeFiles/rebuild_cache.dir
+/home/tarun/testing/build/_deps/gallatin-build/CMakeFiles/edit_cache.dir
+/home/tarun/testing/build/_deps/gallatin-build/CMakeFiles/rebuild_cache.dir

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
+
+
 project(cuEFIM
     VERSION 1.0
     LANGUAGES CXX CUDA
@@ -45,3 +47,14 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     CUDA_DEBUG_INFO ON
 )
 
+
+
+
+include(cmake/CPM.cmake)
+CPMAddPackage(
+  NAME gallatin
+  GITHUB_REPOSITORY saltsystemslab/gallatin
+  GIT_TAG origin/main
+)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE gallatin)

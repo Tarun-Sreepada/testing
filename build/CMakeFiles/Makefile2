@@ -64,15 +64,32 @@ CMAKE_BINARY_DIR = /home/tarun/testing/build
 
 # The main recursive "all" target.
 all: CMakeFiles/cuEFIM.dir/all
+all: _deps/gallatin-build/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
-preinstall:
+preinstall: _deps/gallatin-build/preinstall
 .PHONY : preinstall
 
 # The main recursive "clean" target.
 clean: CMakeFiles/cuEFIM.dir/clean
+clean: _deps/gallatin-build/clean
 .PHONY : clean
+
+#=============================================================================
+# Directory level rules for directory _deps/gallatin-build
+
+# Recursive "all" directory target.
+_deps/gallatin-build/all:
+.PHONY : _deps/gallatin-build/all
+
+# Recursive "preinstall" directory target.
+_deps/gallatin-build/preinstall:
+.PHONY : _deps/gallatin-build/preinstall
+
+# Recursive "clean" directory target.
+_deps/gallatin-build/clean:
+.PHONY : _deps/gallatin-build/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/cuEFIM.dir

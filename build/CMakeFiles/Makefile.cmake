@@ -11,6 +11,13 @@ set(CMAKE_MAKEFILE_DEPENDS
   "CMakeFiles/3.28.3/CMakeCUDACompiler.cmake"
   "CMakeFiles/3.28.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.28.3/CMakeSystem.cmake"
+  "_deps/gallatin-src/CMakeLists.txt"
+  "_deps/gallatin-src/cmake/CPM.cmake"
+  "_deps/gallatin-src/cmake/ConfigureExecutable.cmake"
+  "_deps/gallatin-src/cmake/EvalGpuArchs.cmake"
+  "cmake/CPM_0.27.3.cmake"
+  "cmake/CPM_0.40.5.cmake"
+  "/home/tarun/testing/cmake/CPM.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCUDAInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCXXInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCommonLanguageInclude.cmake"
@@ -19,11 +26,23 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/CMakeLanguageInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeSystemSpecificInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeSystemSpecificInitialize.cmake"
+  "/usr/share/cmake-3.28/Modules/CheckCXXSourceCompiles.cmake"
+  "/usr/share/cmake-3.28/Modules/CheckIncludeFileCXX.cmake"
+  "/usr/share/cmake-3.28/Modules/CheckLibraryExists.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/GNU-CXX.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/GNU.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/NVIDIA-CUDA.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/NVIDIA.cmake"
+  "/usr/share/cmake-3.28/Modules/ExternalProject/shared_internal_commands.cmake"
+  "/usr/share/cmake-3.28/Modules/FetchContent.cmake"
+  "/usr/share/cmake-3.28/Modules/FetchContent/CMakeLists.cmake.in"
+  "/usr/share/cmake-3.28/Modules/FindCUDAToolkit.cmake"
+  "/usr/share/cmake-3.28/Modules/FindGit.cmake"
+  "/usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake"
+  "/usr/share/cmake-3.28/Modules/FindPackageMessage.cmake"
+  "/usr/share/cmake-3.28/Modules/FindThreads.cmake"
+  "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-GNU-CXX.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-GNU.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-Initialize.cmake"
@@ -39,7 +58,9 @@ set(CMAKE_MAKEFILE_OUTPUTS
 
 # Byproducts of CMake generate step:
 set(CMAKE_MAKEFILE_PRODUCTS
+  "_deps/gallatin-subbuild/CMakeLists.txt"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
+  "_deps/gallatin-build/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
