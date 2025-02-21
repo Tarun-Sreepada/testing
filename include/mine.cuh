@@ -73,6 +73,38 @@ __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
     high_utility_patterns[idx + wi->pattern_length] = wi->utility;
 }
 
+__device__ int get_local_util(Item *local_util, int local_util_count, int key)
+{
+    int idx = find_item(local_util, local_util_count, key);
+    if (idx == -1)
+        return 0;
+    return local_util[idx].util;
+}
+
+// __device__ void sort_transaction(Item *data, int length,
+//     Item *local_util, int local_util_count,
+//                                  int min_util)
+// {
+//     // Simple bubble sort for demonstration.
+//     for (int i = 0; i < length - 1; i++)
+//     {
+//         for (int j = 0; j < length - i - 1; j++)
+//         {
+//             // Get local utility for each transaction's key.
+//             int util_a = get_local_util(local_util, local_util_count, data[j].key);
+//             int util_b = get_local_util(local_util, local_util_count, data[j + 1].key);
+
+//             // For ascending order, swap if the current element has higher utility than the next.
+//             if (util_a > util_b)
+//             {
+//                 Item temp = data[j];
+//                 data[j] = data[j + 1];
+//                 data[j + 1] = temp;
+//             }
+//         }
+//     }
+// }
+
 __global__ void test(AtomicWorkStack *curr_work_queue,
                      int32_t *d_high_utility_patterns,
                      int min_util)
@@ -94,7 +126,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
     __shared__ Item *subtree_util;
     __shared__ int max_item;
     __shared__ int primary_count;
-    
 
     // The outer loop: each iteration pops a new work-item from the global queue.
     while (curr_work_queue->get_active() > 0)
@@ -332,8 +363,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (11) Compact the transactions array (this step is done serially by thread 0).
         if (tid == 0)
         {
-
-
             int compact_index = 0;
             for (int i = 0; i < new_work_item.db->numTransactions; i++)
             {
@@ -344,7 +373,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 }
             }
             new_work_item.db->numTransactions = compact_index;
-
 
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
@@ -362,20 +390,17 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             }
             curr_work_queue->finish_task();
 
-
             // Free allocated memory here if necessary.
             global_free(local_util);
             global_free(temp_transaction);
             global_free(hashes);
             global_free(subtree_util);
 
-
             int ret = atomicAdd(&work_item.work_done[0], 1);
-
 
             if (ret == (work_item.work_count - 1))
             {
-                
+
                 global_free(work_item.work_done);
                 global_free(work_item.pattern);
                 global_free(work_item.db->d_data);
