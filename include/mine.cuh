@@ -59,7 +59,7 @@ __device__ void add_bucket_util(Item *local_util, int table_size, int key, int t
 
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
-    printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
+    // printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -94,6 +94,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
     __shared__ Item *subtree_util;
     __shared__ int max_item;
     __shared__ int primary_count;
+    
 
     // The outer loop: each iteration pops a new work-item from the global queue.
     while (curr_work_queue->get_active() > 0)
@@ -229,12 +230,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 global_malloc(num_transactions * sizeof(Transaction)));
             new_work_item.db->numItems = 0;
             new_work_item.db->numTransactions = 0;
-        }
-        __syncthreads();
 
-        // (7) Allocate and initialize structures for merging and primary item calculations.
-        if (tid == 0)
-        {
             max_item = 0;
             primary_count = 0;
             hashes = reinterpret_cast<int *>(
@@ -336,19 +332,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (11) Compact the transactions array (this step is done serially by thread 0).
         if (tid == 0)
         {
-            // printf("New database\n");
-            // printDatabase(new_work_item.db);
-            // for (int i = 0; i < new_work_item.db->numTransactions; i++)
-            // {
-            //     Transaction &tran = new_work_item.db->d_transactions[i];
-            //     printf("Utility: %d\tLength: %d\tStart: %p\n", tran.utility, tran.length, tran.data);
-            //     // printf("%d|", tran.utility);
-            //     // for (int j = 0; j < tran.length; j++)
-            //     // {
-            //     //     printf("%d:%d ", tran.data[j].key, tran.data[j].util);
-            //     // }
-            //     // printf("\n");
-            // }
 
 
             int compact_index = 0;
@@ -361,6 +344,8 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 }
             }
             new_work_item.db->numTransactions = compact_index;
+
+
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
             new_work_item.work_done = reinterpret_cast<int *>(

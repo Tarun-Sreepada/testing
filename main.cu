@@ -20,47 +20,70 @@
 #define page_size (128 * KILO)
 #define total_memory (4 * GIGA)
 
-#define blocks 512
+#define blocks 16384
 #define threads 512
 // make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 // make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 
-
-
 __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item, int *primary, int primary_size)
 {
-    WorkItem item;
-    item.pattern = (int *)global_malloc(sizeof(int));
-    item.pattern_length = 0;
-    item.utility = 0;
-    item.db = (Database *)global_malloc(sizeof(Database));
-    item.db->numItems = 0;
+    int tid = threadIdx.x;
+    __shared__ WorkItem item;
+    // WorkItem item;
+    if (tid == 0)
+    {
+        item.pattern = (int *)global_malloc(sizeof(int));
+        item.pattern_length = 0;
+        item.utility = 0;
+        item.db = (Database *)global_malloc(sizeof(Database));
+        item.db->numItems = 0;
+        item.db->d_data = (Item *)global_malloc(sizeof(Item) * work_item->db->numItems);
+        item.db->d_transactions = (Transaction *)global_malloc(sizeof(Transaction) * work_item->db->numTransactions);
+        item.db->numTransactions = work_item->db->numTransactions;
+        item.max_item = work_item->max_item;
 
-    item.db->d_data = (Item *)global_malloc(sizeof(Item) * work_item->db->numItems);
-    memcpy(item.db->d_data, work_item->db->d_data, sizeof(Item) * work_item->db->numItems);
-    
-    item.db->d_transactions = (Transaction *)global_malloc(sizeof(Transaction) * work_item->db->numTransactions);
-    for (int i = 0; i < work_item->db->numTransactions; i++)
+        item.work_done = (int *)global_malloc(sizeof(int));
+        item.work_done[0] = 0;
+        item.work_count = primary_size;
+    }
+
+    __syncthreads();
+
+    for (int i = tid; i < work_item->db->numItems; i += blockDim.x)
+    {
+        item.db->d_data[i] = work_item->db->d_data[i];
+    }
+
+    __syncthreads();
+
+    for (int i = tid; i < work_item->db->numTransactions; i += blockDim.x)
     {
         item.db->d_transactions[i].data = item.db->d_data + (work_item->db->d_transactions[i].data - work_item->db->d_data);
         item.db->d_transactions[i].utility = 0;
         item.db->d_transactions[i].length = work_item->db->d_transactions[i].length;
     }
-    item.db->numTransactions = work_item->db->numTransactions;
-    item.max_item = work_item->max_item;
 
-    item.work_done = (int *)global_malloc(sizeof(int));
-    item.work_done[0] = 0;
-    item.work_count = primary_size;
+    __syncthreads();
 
-    for (int i = 0; i < primary_size; i++)
+    // memcpy(item.db->d_data, work_item->db->d_data, sizeof(Item) * work_item->db->numItems);
+
+    // for (int i = 0; i < work_item->db->numTransactions; i++)
+    // {
+    //     item.db->d_transactions[i].data = item.db->d_data + (work_item->db->d_transactions[i].data - work_item->db->d_data);
+    //     item.db->d_transactions[i].utility = 0;
+    //     item.db->d_transactions[i].length = work_item->db->d_transactions[i].length;
+    // }
+
+    if (tid == 0)
     {
-        item.primary = primary[i];
-        curr_work_queue->push(item);
+        for (int i = 0; i < primary_size; i++)
+        {
+            item.primary = primary[i];
+            curr_work_queue->push(item);
+        }
     }
-
+   
 }
-
 
 std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::unordered_map<int, std::string> rename)
 
@@ -176,7 +199,6 @@ int main(int argc, char *argv[])
     cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
     curr_work_queue->init();
 
-
     WorkItem *work_item;
     cudaMallocManaged(&work_item, sizeof(WorkItem));
     work_item->pattern = nullptr;
@@ -208,19 +230,16 @@ int main(int argc, char *argv[])
     int *d_primary;
     cudaMallocManaged(&d_primary, primary.size() * sizeof(int));
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
-    
 
-    copy_work<<<1, 1>>>(curr_work_queue, work_item, d_primary, primary.size());
+    copy_work<<<1, threads>>>(curr_work_queue, work_item, d_primary, primary.size());
     cudaDeviceSynchronize();
 
     // WorkItem work_item;
     // work_item.pattern = (int *)mm->host_malloc(sizeof(int));
     // work_item.pattern_length = 0;
 
-
     // work_item.db = (Database *)mm->host_malloc(sizeof(Database));
     // work_item.db->numItems = items.size();
-
 
     // work_item.db->d_data = (Item *)mm->host_malloc(items.size() * sizeof(Item));
     // cudaMemcpy(work_item.db->d_data, items.data(), items.size() * sizeof(Item), cudaMemcpyHostToDevice);
@@ -282,7 +301,6 @@ int main(int argc, char *argv[])
     // }
 
     std::cout << "High Utility Patterns: " << Patterns.size() << "\n";
-
 
     free_global_allocator();
 

@@ -69,17 +69,6 @@ struct AtomicWorkStack {
         return success;
     }
 
-    __host__ bool host_push(WorkItem item) {
-        bool success = false;
-        if (top < CAPACITY) {  // Check if stack is not full
-            items[top] = item;
-            top = top + 1;
-            active = active + 1;
-            success = true;
-        }
-        return success;
-    }
-
     // Pop a work item from the stack (LIFO)
     __device__ bool pop(WorkItem *item) {
         bool success = false;
