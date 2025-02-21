@@ -20,8 +20,7 @@
 #define page_size (128 * KILO)
 #define total_memory (4 * GIGA)
 
-#define blocks 1
-#define threads 1
+
 // make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 // make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
 

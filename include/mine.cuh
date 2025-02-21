@@ -6,7 +6,12 @@
 #include "memory.cuh" // Include the memory manager
 #include "mine.cuh"
 
+#include <cub/cub.cuh>
+
 #define scale 2
+
+#define blocks 512
+#define threads 512
 
 __device__ void printBucketUtil(Item *local_util, int max_item)
 {
@@ -18,6 +23,11 @@ __device__ void printBucketUtil(Item *local_util, int max_item)
         }
     }
     printf("\n");
+}
+
+__device__ int minimum(int a, int b)
+{
+    return a < b ? a : b;
 }
 
 __device__ void printPattern(WorkItem *wi)
@@ -59,7 +69,7 @@ __device__ void add_bucket_util(Item *local_util, int table_size, int key, int t
 
 __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
-    // printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
+    printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -80,30 +90,6 @@ __device__ int get_local_util(Item *local_util, int local_util_count, int key)
         return 0;
     return local_util[idx].util;
 }
-
-// __device__ void sort_transaction(Item *data, int length,
-//     Item *local_util, int local_util_count,
-//                                  int min_util)
-// {
-//     // Simple bubble sort for demonstration.
-//     for (int i = 0; i < length - 1; i++)
-//     {
-//         for (int j = 0; j < length - i - 1; j++)
-//         {
-//             // Get local utility for each transaction's key.
-//             int util_a = get_local_util(local_util, local_util_count, data[j].key);
-//             int util_b = get_local_util(local_util, local_util_count, data[j + 1].key);
-
-//             // For ascending order, swap if the current element has higher utility than the next.
-//             if (util_a > util_b)
-//             {
-//                 Item temp = data[j];
-//                 data[j] = data[j + 1];
-//                 data[j + 1] = temp;
-//             }
-//         }
-//     }
-// }
 
 __global__ void test(AtomicWorkStack *curr_work_queue,
                      int32_t *d_high_utility_patterns,
@@ -127,6 +113,11 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
     __shared__ int max_item;
     __shared__ int primary_count;
 
+    __shared__ int *cumulative_indices;
+    __shared__ int prev;
+
+    __shared__ int offsets[threads];
+
     // The outer loop: each iteration pops a new work-item from the global queue.
     while (curr_work_queue->get_active() > 0)
     {
@@ -147,6 +138,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (2) Thread 0 initializes the new work item.
         if (tid == 0)
         {
+            // printf("Starting work item\n");
             memset(&new_work_item, 0, sizeof(WorkItem));
             new_work_item.utility = 0;
             // Allocate and copy the pattern
@@ -217,6 +209,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // All threads wait, then thread 0 checks if the pattern qualifies:
         if (tid == 0)
         {
+            // printf("Utility: %d\n", new_work_item.utility);
             if (new_work_item.utility >= min_util)
             {
                 add_pattern(&new_work_item, d_high_utility_patterns);
@@ -255,6 +248,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (6) Allocate memory for the new database in new_work_item.
         if (tid == 0)
         {
+            // printf("Allocating memory\n");
             new_work_item.db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
             new_work_item.db->d_data = reinterpret_cast<Item *>(global_malloc(num_items * sizeof(Item)));
             new_work_item.db->d_transactions = reinterpret_cast<Transaction *>(
@@ -270,6 +264,11 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             subtree_util = reinterpret_cast<Item *>(
                 global_malloc(work_item.max_item * scale * sizeof(Item)));
             memset(subtree_util, 0, work_item.max_item * scale * sizeof(Item));
+
+            cumulative_indices = (int *)global_malloc(sizeof(int) * (num_transactions + 1));
+            // memset(cumulative_indices, 0, sizeof(int) * (num_transactions + 1));
+            // cumulative_indices[0] = 0;
+            // prev = 0;
         }
         __syncthreads();
 
@@ -328,6 +327,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 if (old == -1)
                 {
                     // Inserted successfully.
+                    // cumulative_indices[new_trans_idx + 1] = 1;
                     break;
                 }
                 // If the transactions have the same key pattern, merge them.
@@ -350,6 +350,26 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         }
         __syncthreads();
 
+        if (new_work_item.db->numTransactions == 0)
+        {
+            if (tid == 0)
+            {
+                curr_work_queue->finish_task();
+
+                // Free allocated memory here if necessary.
+                global_free(local_util);
+                global_free(temp_transaction);
+                global_free(hashes);
+                global_free(subtree_util);
+                global_free(cumulative_indices);
+
+                // Free the pattern.
+                global_free(new_work_item.pattern);
+            }
+            __syncthreads();
+            continue;
+        }
+
         // (10) Update max_item and primary_count in parallel.
         for (int i = tid; i < work_item.max_item * scale; i += blockDim.x)
         {
@@ -360,10 +380,113 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         }
         __syncthreads();
 
+        // // Optional: Print pre-scan for debugging (only thread 0 prints all)
+        // if (tid == 0)
+        // {
+        //     printf("Pre-cumulative indices: ");
+        //     for (int i = 0; i < (num_transactions + 1); i++)
+        //     {
+        //         printf("%d ", cumulative_indices[i]);
+        //     }
+        //     printf("\n");
+        // }
+
+        // // f cumulative_indices[i + 1] = (d_transactions[i].data != nullptr) ? 1 : 0;
+        // for (int i = tid; i < num_transactions; i += blockDim.x)
+        // {
+        //     cumulative_indices[i + 1] = (new_work_item.db->d_transactions[i].data != nullptr) ? 1 : 0;
+        // }
+
+        // __syncthreads();
+
+        // if (num_transactions <= blockDim.x)
+        // // if (tid == 0)
+        // {
+        //     // printf("Nil or not\n");
+
+        //     // for (int i = 0; i < num_transactions; i++)
+        //     // {
+        //     //     printf("%p:count:%d\n", new_work_item.db->d_transactions[i].data, cumulative_indices[i + 1]);
+        //     // }
+
+        //     // printf("Num transactions: %d\n", num_transactions);
+        //     for (int i = 1; i < num_transactions + 1; i++)
+        //     {
+        //         cumulative_indices[i] += cumulative_indices[i - 1];
+        //     }
+        // }
+        // else
+        // {
+        //     size_t chunk_size = ((num_transactions+1) + blockDim.x - 1) / blockDim.x;
+        //     size_t start = tid * chunk_size;
+        //     size_t end = min(start + chunk_size, (size_t)(num_transactions + 1));
+
+        //     int local_sum = 0;
+        //     for (int i = start; i < end; i++)
+        //     {
+        //         local_sum += cumulative_indices[i];
+        //         cumulative_indices[i] = local_sum;
+        //     }
+
+        //     offsets[tid] = local_sum;
+        //     __syncthreads();
+
+        //     if (tid == 0)
+        //     {
+        //         for (int i = 1; i < blockDim.x; i++)
+        //         {
+        //             offsets[i] += offsets[i - 1];
+        //         }
+        //     }
+        //     __syncthreads();
+
+        //     int offset = (tid == 0) ? 0 : offsets[tid - 1];
+        //     for (int i = start; i < end; i++)
+        //     {
+        //         cumulative_indices[i] += offset;
+        //     }
+
+        //     __syncthreads();
+
+        // }
+
+        // __syncthreads();
+
+        // for (int i = tid; i < num_transactions; i += blockDim.x)
+        // {
+        //     if (cumulative_indices[i] != cumulative_indices[i + 1])
+        //         new_work_item.db->d_transactions[cumulative_indices[i]] = new_work_item.db->d_transactions[i];
+        // }
+
+        // // Optional: Print post-scan for debugging (only thread 0 prints all)
+        // if (tid == 0)
+        // {
+        //     printf("Post-cumulative indices: ");
+        //     for (int i = 0; i < (num_transactions + 1); i++)
+        //     {
+        //         printf("%d ", cumulative_indices[i]);
+        //     }
+        //     printf("\n");
+        // }
+
+        // __syncthreads();
+
+        // for (int i = tid; i < num_transactions; i += blockDim.x)
+        // {
+        //     if (cumulative_indices[i] != cumulative_indices[i + 1])
+        //         new_work_item.db->d_transactions[cumulative_indices[i]] = new_work_item.db->d_transactions[i];
+        // }
+
+        // __syncthreads();
+
+        // __syncthreads();
         // (11) Compact the transactions array (this step is done serially by thread 0).
         if (tid == 0)
         {
+            // printf("Compacting transactions\n");
+            // printf("Num transactions: %d\ttotal: %d\n", num_transactions, cumulative_indices[num_transactions]);/
             int compact_index = 0;
+            // int temp_old = new_work_item.db->numTransactions;
             for (int i = 0; i < new_work_item.db->numTransactions; i++)
             {
                 if (new_work_item.db->d_transactions[i].data != nullptr)
@@ -373,6 +496,31 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 }
             }
             new_work_item.db->numTransactions = compact_index;
+            // new_work_item.db->numTransactions = cumulative_indices[num_transactions];
+
+            // if (compact_index != cumulative_indices[num_transactions])
+            // {
+            //     printf("Num transactions: %d\tCompact: %d\ttotal: %d\n", num_transactions, compact_index, cumulative_indices[num_transactions]);
+
+            //     // printf("%p\n", new_work_item.db->d_transactions);
+            //     for (int i = 0; i < temp_old; i++)
+            //     {
+            //         // new_work_item.db->d_transactions[i] = new_work_item.db->d_transactions[i + compact_index];
+            //         printf("%p:count:%d\n", new_work_item.db->d_transactions[i].data, cumulative_indices[i]);
+            //     }
+            //     printf("Num transactions: %d\tCompact: %d\ttotal: %d\n", num_transactions, compact_index, cumulative_indices[num_transactions]);
+            //     printf("Mismatch\n\n\n\n\n\n");
+            // }
+
+            // compact_index = 0;
+            // for (int i = 0; i < new_work_item.db->numTransactions; i++)
+            // {
+            //     if (new_work_item.db->d_transactions[i].data != nullptr)
+            //     {
+            //         new_work_item.db->d_transactions[compact_index++] =
+            //             new_work_item.db->d_transactions[i];
+            //     }
+            // }
 
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
@@ -395,6 +543,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             global_free(temp_transaction);
             global_free(hashes);
             global_free(subtree_util);
+            global_free(cumulative_indices);
 
             int ret = atomicAdd(&work_item.work_done[0], 1);
 
