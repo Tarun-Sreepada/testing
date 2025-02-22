@@ -9,8 +9,8 @@
 
 #define scale 2
 
-#define blocks 16
-#define threads 128
+#define blocks 512
+#define threads 512
 
 __device__ void printBucketUtil(Item *local_util, int max_item)
 {
@@ -140,7 +140,7 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
         if (tid == 0)
         {
             // printf("Starting work item\n");
-            printf("Work left: %d\n", curr_work_queue->get_active());
+            // printf("Work left: %d\n", curr_work_queue->get_active());
             memset(&new_work_item, 0, sizeof(WorkItem));
             new_work_item.utility = 0;
             // Allocate and copy the pattern
@@ -152,8 +152,9 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
             new_work_item.pattern[work_item.pattern_length] = work_item.primary;
             new_work_item.pattern_length = work_item.pattern_length + 1;
 
-            printPattern(&new_work_item);
-            printf("Num transactions: %d\n", work_item.db->numTransactions);
+            // printPattern(&new_work_item);
+            // printf("Num transactions: %d\n", work_item.db->numTransactions);
+            // printf("Max item: %d\n", work_item.max_item);
 
             num_items = 0;
             num_transactions = 0;
@@ -171,8 +172,10 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
         int partial_item_count = 0;
         for (int i = tid; i < work_item.db->numTransactions; i += blockDim.x)
         {
-            printf("i: %d\n", i);
+            // printf("i: %d\n", i);
             Transaction &oldTrans = work_item.db->d_transactions[i];
+            if (oldTrans.length == 0)
+                continue;
             int idx = oldTrans.findItem(work_item.primary);
             if (idx == -1)
                 continue;
@@ -224,7 +227,7 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
         // All threads wait, then thread 0 checks if the pattern qualifies:
         if (tid == 0)
         {
-            printf("Utility: %d\n", new_work_item.utility);
+            // printf("Utility: %d\n", new_work_item.utility);
             if (new_work_item.utility >= min_util)
             {
                 add_pattern(&new_work_item, d_high_utility_patterns);
@@ -263,7 +266,7 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
         // (6) Allocate memory for the new database in new_work_item.
         if (tid == 0)
         {
-            printf("Allocating memory\n");
+            // printf("Allocating memory\n");
             new_work_item.db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
             new_work_item.db->d_data = reinterpret_cast<Item *>(global_malloc(num_items * sizeof(Item)));
             new_work_item.db->d_transactions = reinterpret_cast<Transaction *>(
@@ -410,10 +413,10 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
         // (11) Compact the transactions array (this step is done serially by thread 0).
         if (tid == 0)
         {
-            printf("Compacting\n");
+            // printf("Compacting\n");
             new_work_item.db->numTransactions = compact_index;
 
-            new_work_item.max_item = max_item;
+            new_work_item.max_item = work_item.max_item;
             new_work_item.work_count = primary_count;
             new_work_item.work_done = reinterpret_cast<int *>(
                 global_malloc(sizeof(int)));
@@ -454,235 +457,200 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
     }
 }
 
-// __global__ void scan(WorkItem *old, tempWork *temp)
-// {
+__global__ void scan(WorkItem *work_item, tempWork *working)
+{
 
-//     WorkItem work_item = *old;
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= work_item->db->numTransactions)
+        return;
 
-//     if (tid >= old->db->numTransactions)
-//         return;
+    Transaction &oldTrans = work_item->db->d_transactions[tid];
+    int idx = oldTrans.findItem(work_item->primary);
+    if (idx == -1)
+        return;
 
-//     Transaction &oldTrans = work_item.db->d_transactions[tid];
-//     int idx = oldTrans.findItem(work_item.primary);
-//     if (idx == -1)
-//         return;
+    int suffix_count = oldTrans.length - (idx + 1);
+    atomicAdd(&working->utility, oldTrans.utility + oldTrans.data[idx].util);
+    atomicAdd(&working->num_items, suffix_count);
+    if (suffix_count == 0) return;
 
-//     int suffix_count = oldTrans.length - (idx + 1);
-//     atomicAdd(&temp->utility, oldTrans.utility + oldTrans.data[idx].util);
-//     atomicAdd(&temp->num_items, suffix_count);
-//     if (suffix_count == 0) return;
+    // int t_idx = atomicAdd(&temp->num_transactions, 1);
+    int t_idx = atomicAdd(&working->num_transactions, 1);
 
-//     int t_idx = atomicAdd(&temp->num_transactions, 1);
+    Transaction &newTrans = working->temp_transaction[t_idx];
+    newTrans.data = oldTrans.data + idx + 1;
+    newTrans.length = suffix_count;
+    newTrans.utility = oldTrans.utility + oldTrans.data[idx].util;
 
-//     Transaction &newTrans = temp->temp_transaction[t_idx];
-//     newTrans.data = oldTrans.data + idx + 1;
-//     newTrans.length = suffix_count;
-//     newTrans.utility = oldTrans.utility + oldTrans.data[idx].util;
+    // Compute the total local utility for the transaction.
+    int total_local_util = newTrans.utility;
+    for (int j = 0; j < suffix_count; j++)
+        total_local_util += newTrans.data[j].util;
 
-//     // Compute the total local utility for the transaction.
-//     int total_local_util = newTrans.utility;
-//     for (int j = 0; j < suffix_count; j++)
-//     {
-//         total_local_util += newTrans.data[j].util;
-//     }
+    // Update the local utility buckets.
+    for (int j = 0; j < suffix_count; j++)
+    {
 
-//     // Update the local utility buckets.
-//     for (int j = 0; j < suffix_count; j++)
-//     {
-//         add_bucket_util(temp->local_util,
-//                         work_item.max_item * scale,
-//                         newTrans.data[j].key,
-//                         total_local_util);
-//     }
+        add_bucket_util(working->local_util,
+                        work_item->max_item * scale,
+                        newTrans.data[j].key,
+                        total_local_util);
+    }
 
-// }
+}
 
-// __global__ void allocate(WorkItem *old, tempWork *temp)
-// {
-
-//     temp->db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
-//     temp->db->d_data = reinterpret_cast<Item *>(global_malloc(temp->num_items * sizeof(Item)));
-//     temp->db->d_transactions = reinterpret_cast<Transaction *>(global_malloc(temp->num_transactions * sizeof(Transaction)));
-//     temp->db->numItems = 0;
-//     temp->db->numTransactions = 0;
-
-//     temp->max_item = 0;
-//     temp->primary_count = 0;
-
-// }
+__global__ void allocate(tempWork *working)
+{
+    working->db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
+    working->db->d_data = reinterpret_cast<Item *>(global_malloc(working->num_items * sizeof(Item)));
+    working->db->d_transactions = reinterpret_cast<Transaction *>(global_malloc(working->num_transactions * sizeof(Transaction)));
+    working->db->numItems = 0;
+    working->db->numTransactions = 0;
+}
 
 // __global__ void project_trim(WorkItem *old, tempWork *temp, int min_util)
-// {
+__global__ void trim_project(WorkItem *work_item, tempWork *working, int min_util)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= working->num_transactions)
+        return;
 
-//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-//     if (tid >= temp->num_transactions)
-//         return;
+    Transaction tempTrans = working->temp_transaction[tid];
+    int total_subtree_util = tempTrans.utility;
+    int count = 0;
+    // Count how many items survive filtering.
+    for (int j = 0; j < tempTrans.length; j++)
+    {
+        int idx = find_item(working->local_util, work_item->max_item * scale, tempTrans.data[j].key);
+        if (idx == -1)
+            continue;
+        if (working->local_util[idx].util >= min_util)
+        {
+            count++;
+            total_subtree_util += tempTrans.data[j].util;
+        }
+    }
 
-//     WorkItem work_item = *old;
+    if (count == 0)
+        return;
 
-//     // (8) For each temporary transaction, filter and copy it into the new DB.
-//     Transaction tempTrans = temp->temp_transaction[tid];
-//     int total_subtree_util = tempTrans.utility;
-//     int count = 0;
-//     // Count how many items survive filtering.
-//     for (int j = 0; j < tempTrans.length; j++)
-//     {
-//         int idx = find_item(temp->local_util, work_item.max_item * scale, tempTrans.data[j].key);
-//         if (idx == -1)
-//             continue;
-//         if (temp->local_util[idx].util >= min_util)
-//         {
-//             count++;
-//             total_subtree_util += tempTrans.data[j].util;
-//         }
-//     }
+    int newTransIdx = atomicAdd(&working->db->numTransactions, 1);
+    Transaction &newTrans = working->db->d_transactions[newTransIdx];
 
-//     if (count == 0)
-//         return;
+    int start = atomicAdd(&working->db->numItems, count);
+    newTrans.data = working->db->d_data + start;
+    newTrans.length = count;
+    newTrans.utility = tempTrans.utility;
 
-//     int new_trans_idx = atomicAdd(&temp->db->numTransactions, 1);
-//     Transaction &newTrans = temp->db->d_transactions[new_trans_idx];
+    int trans_idx = 0;
+    int temp_util = 0;
+    for (int j = 0; j < tempTrans.length; j++)
+    {
+        int idx = find_item(working->local_util, work_item->max_item * scale, tempTrans.data[j].key);
+        if (working->local_util[idx].util >= min_util)
+        {
+            newTrans.data[trans_idx++] = tempTrans.data[j];
+            add_bucket_util(working->subtree_util,
+                            work_item->max_item * scale,
+                            tempTrans.data[j].key,
+                            total_subtree_util - temp_util);
+            temp_util += tempTrans.data[j].util;
+        }
 
-//     int start = atomicAdd(&temp->db->numItems, count);
-//     newTrans.data = temp->db->d_data + start;
-//     newTrans.length = count;
-//     newTrans.utility = tempTrans.utility;
-
-//     int trans_idx = 0;
-//     int temp_util = 0;
-//     for (int j = 0; j < tempTrans.length; j++)
-//     {
-//         int idx = find_item(temp->local_util, work_item.max_item * scale, tempTrans.data[j].key);
-//         if (idx == -1)
-//             continue;
-//         if (temp->local_util[idx].util >= min_util)
-//         {
-//             newTrans.data[trans_idx++] = tempTrans.data[j];
-//             add_bucket_util(temp->subtree_util,
-//                             work_item.max_item * scale,
-//                             tempTrans.data[j].key,
-//                             total_subtree_util - temp_util);
-//             temp_util += tempTrans.data[j].util;
-//         }
-//     }
+    }
 
 //     // (9) Use open addressing to try to merge transactions.
-//     int hash_idx = items_hasher(newTrans.data, newTrans.length, work_item.db->numTransactions * scale);
-//     while (true)
-//     {
-//         int old = atomicCAS(&temp->hashes[hash_idx], -1, new_trans_idx);
-//         if (old == -1)
-//         {
-//             break;
-//         }
-//         // If the transactions have the same key pattern, merge them.
-//         if (temp->db->sameKey(old, new_trans_idx))
-//         {
-//             Transaction &oldTran = temp->db->d_transactions[old];
-//             atomicAdd(&oldTran.utility, newTrans.utility);
-//             for (int j = 0; j < oldTran.length; j++)
-//             {
-//                 atomicAdd(&oldTran.data[j].util, newTrans.data[j].util);
-//             }
-//             // Mark this transaction as merged.
-//             newTrans.data = nullptr;
-//             newTrans.length = 0;
-//             newTrans.utility = 0;
-//             break;
-//         }
-//         hash_idx = (hash_idx + 1) % (work_item.db->numTransactions * scale);
-//     }
-// }
+    int hash_idx = items_hasher(newTrans.data, newTrans.length, work_item->db->numTransactions * scale);
+    while (true)
+    {
+        // int old = atomicCAS(&temp->hashes[hash_idx], -1, new_trans_idx);
+        int old = atomicCAS(&working->hashes[hash_idx], -1, newTransIdx);
+        if (old == -1)
+        {
+            break;
+        }
+        // If the transactions have the same key pattern, merge them.
+        if (working->db->sameKey(old, newTransIdx))
+        {
+            Transaction &oldTran = working->db->d_transactions[old];
+            atomicAdd(&oldTran.utility, newTrans.utility);
+            for (int j = 0; j < oldTran.length; j++)
+            {
+                atomicAdd(&oldTran.data[j].util, newTrans.data[j].util);
+            }
+            // Mark this transaction as merged.
+            newTrans.data = nullptr;
+            newTrans.length = 0;
+            newTrans.utility = 0;
+            break;
+        }
+        hash_idx = (hash_idx + 1) % (work_item->db->numTransactions * scale);
+    }
+}
 
-// __global__ void finalize(AtomicWorkStack *stack, WorkItem *old, tempWork *temp, int min_util)
-// {
-//     __shared__ WorkItem work_item;
-//     __shared__ int max_item;
-//     __shared__ int primary_count;
-//     __shared__ int compact_index;
+__global__ void finalize(AtomicWorkStack *stack, WorkItem *work_item, tempWork *working, int min_util)
+{
+    __shared__ int max_item;
+    __shared__ int primary_count;
+    __shared__ int compact_index;
+    int tid = threadIdx.x;
 
-//     if (threadIdx.x == 0)
-//     {
-//         work_item = *old;
-//         max_item = 0;
-//         primary_count = 0;
-//         compact_index = 0;
-//     }
-//     __syncthreads();
 
-//     int tid = threadIdx.x;
-//     for(int i = tid; i < work_item.max_item * scale; i += blockDim.x)
-//     {
-//         Item curr = temp->subtree_util[i];
-//         if (temp->local_util[i].util >= min_util) atomicAdd(&max_item, 1);
+    if (threadIdx.x == 0)
+    {
+        max_item = 0;
+        primary_count = 0;
+        compact_index = 0;
+    }
+    __syncthreads();
 
-//         if (curr.util >= min_util)
-//         {
-//             temp->subtree_util[atomicAdd(&primary_count, 1)] = curr;
-//         }
-//     }
-//     __syncthreads();
+    for (int i = tid; i < work_item->max_item * scale; i += blockDim.x)
+    {
+        if (working->local_util[i].util >= min_util)
+            atomicAdd(&max_item, 1);
 
-//     // WorkItem work_item = *old;
-//     // // (10) Update max_item and primary_count in parallel.
-//     // for (int i = 0; i < work_item.max_item * scale; i += blockDim.x)
-//     // {
-//     //     if (temp->local_util[i].util >= min_util)
-//     //         temp->max_item += 1;
-//     //     if (temp->subtree_util[i].util >= min_util){
-//     //         temp->subtree_util[temp->primary_count] = temp->subtree_util[i];
-//     //         temp->primary_count += 1;
-//     //     }
-//     // }
+        Item curr = working->subtree_util[i];
+        if (working->subtree_util[i].util >= min_util)
+        {
+            working->subtree_util[atomicAdd(&primary_count, 1)] = curr;
+        }
+    }
 
-//     for (int i = tid; i < temp->db->numTransactions; i += blockDim.x)
-//     {
-//         Transaction curr = temp->db->d_transactions[i];
-//         if (curr.data != nullptr)
-//         {
-//             temp->db->d_transactions[atomicAdd(&compact_index, 1)] = curr;
-//         }
-//     }
-//     __syncthreads();
+    __syncthreads();
 
-//     // int compact_index = 0;
-//     // for (int i = 0; i < temp->db->numTransactions;  i++){
-//     //     if (temp->db->d_transactions[i].data != nullptr)
-//     //     {
-//     //         temp->db->d_transactions[compact_index++] =
-//     //             temp->db->d_transactions[i];
-//     //     }
-//     // }
-//     // temp->db->numTransactions = compact_index;
+    for (int i = tid; i < working->db->numTransactions; i += blockDim.x)
+    {
+        Transaction curr = working->db->d_transactions[i];
+        if (curr.data != nullptr)
+        {
+            working->db->d_transactions[atomicAdd(&compact_index, 1)] = curr;
+        }
+    }
+    __syncthreads();
 
-//     // temp->max_item = max_item;
-//     // temp->work_count = primary_count;
 
-//     __syncthreads();
+    if (tid == 0)
+    {
+        WorkItem new_work_item;
+        new_work_item.pattern = reinterpret_cast<int *>(global_malloc(sizeof(int)));
+        new_work_item.pattern[0] = work_item->primary;
+        new_work_item.pattern_length = 1;
 
-//     if (tid == 0)
-//     {
-//         WorkItem new_work_item;
-//         new_work_item.pattern = reinterpret_cast<int *>(global_malloc(sizeof(int)));
-//         new_work_item.pattern[0] = work_item.primary;
-//         new_work_item.pattern_length = 1;
+        new_work_item.db = working->db;
+        new_work_item.db->numTransactions = compact_index;
+        new_work_item.max_item = max_item;
+        new_work_item.work_count = primary_count;
+        new_work_item.work_done = reinterpret_cast<int *>(global_malloc(sizeof(int)));
+        new_work_item.work_done[0] = 0;
 
-//         new_work_item.db = temp->db;
-//         new_work_item.db->numTransactions = compact_index;
-//         new_work_item.max_item = max_item;
-//         new_work_item.work_count = primary_count;
-//         new_work_item.work_done = reinterpret_cast<int *>(global_malloc(sizeof(int)));
-//         new_work_item.work_done[0] = 0;
+        for (int i = 0; i < primary_count; i++)
+        {
+            new_work_item.primary = working->subtree_util[i].key;
+            stack->push(new_work_item);
+        }
 
-//         for (int i = 0; i < primary_count; i++)
-//         {
-//             new_work_item.primary = temp->subtree_util[i].key;
-//             stack->push(new_work_item);
-//         }
-
-//     }
+    }
 
 //     // printPattern(&new_work_item);
 //     // printf("Utility: %d\n", temp->utility);
@@ -691,268 +659,4 @@ __global__ void mine(AtomicWorkStack *curr_work_queue,
 //     // printf("Subtree Util: ");
 //     // printBucketUtil(temp->subtree_util, work_item.max_item * scale);
 
-// }
-
-// __global__ void initial_mine(WorkItem *work_item,
-//                              tempWork *working,
-//                              int *primary,
-//                              int num_primary,
-//                              AtomicWorkStack *stack,
-//                              int32_t *d_high_utility_patterns,
-//                              int min_util)
-// {
-//     grid_group grid = this_grid();
-
-//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-//     int bid = blockIdx.x;
-//     int total_threads = gridDim.x * blockDim.x;
-
-//     for (int i = 0; i < num_primary; i++)
-//     {
-//         // memset replacement
-//         if (tid == 0)
-//         {
-//             printf("Primary: %d\n", primary[i]);
-//             work_item->primary = primary[i];
-
-//             working->utility = 0;
-//             working->num_items = 0;
-//             working->num_transactions = 0;
-//             working->max_item = 0;
-//             working->primary_count = 0;
-//             working->compact_index = 0;
-
-//         }
-
-//         for(int j = tid; j < work_item->max_item * scale; j += total_threads)
-//         {
-//             working->local_util[j] = {0,0};
-//             working->subtree_util[j] = {0,0};
-//         }
-
-//         for(int j = tid; j < work_item->db->numTransactions * scale; j += total_threads)
-//         {
-//             working->hashes[j] = -1;
-//         }
-
-//         grid.sync();
-
-//         // (2) Scan the transactions in parallel.
-//         for (int j = tid; j < work_item->db->numTransactions; j += total_threads)
-//         {
-//             Transaction &oldTrans = work_item->db->d_transactions[j];
-//             int idx = oldTrans.findItem(work_item->primary);
-//             if (idx == -1) continue;
-
-//             // Update new_work_item.utility atomically.
-//             atomicAdd(&working->utility, oldTrans.utility + oldTrans.data[idx].util);
-
-//             int suffix_count = oldTrans.length - (idx + 1);
-//             if (suffix_count <= 0)
-//                 continue;
-
-//             // Reserve space for suffix items.
-//             atomicAdd(&working->num_items, suffix_count);
-//             int t_idx = atomicAdd(&working->num_transactions, 1);
-
-//             // Create a temporary transaction with the suffix.
-//             Transaction &newTrans = working->temp_transaction[t_idx];
-//             newTrans.data = oldTrans.data + idx + 1;
-//             newTrans.length = suffix_count;
-//             newTrans.utility = oldTrans.utility + oldTrans.data[idx].util;
-
-//             // Compute the total local utility for the transaction.
-//             int total_local_util = newTrans.utility;
-//             for (int k = 0; k < suffix_count; k++)
-//             {
-//                 total_local_util += newTrans.data[k].util;
-//             }
-
-//             // Update the local utility buckets.
-//             for (int k = 0; k < suffix_count; k++)
-//             {
-//                 add_bucket_util(working->local_util,
-//                                 work_item->max_item * scale,
-//                                 newTrans.data[k].key,
-//                                 total_local_util);
-//             }
-//         }
-
-//         grid.sync();
-
-//         if(tid == 0)
-//         {
-//             // printf("Utility: %d\n", working->utility);
-//             if (working->utility >= min_util)
-//             {
-//                 d_high_utility_patterns[0] += 1;
-//                 int idx = d_high_utility_patterns[1];
-//                 d_high_utility_patterns[1] += 3;
-
-//                 d_high_utility_patterns[idx] = work_item->primary;
-//                 d_high_utility_patterns[idx + 1] = working->utility;
-//             }
-//         }
-
-//         if (working->num_transactions == 0) continue;
-        
-//         grid.sync();
-
-
-//         if(tid == 0)
-//         {
-//             working->db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
-//             working->db->d_data = reinterpret_cast<Item *>(global_malloc(working->num_items * sizeof(Item)));
-//             working->db->d_transactions = reinterpret_cast<Transaction *>(global_malloc(working->num_transactions * sizeof(Transaction)));
-//             working->db->numItems = 0;
-//             working->db->numTransactions = 0;
-
-//             working->max_item = 0;
-//             working->primary_count = 0;
-//         }
-
-//         grid.sync();
-
-//         // Trim and project
-//         for (int j = tid; j < working->num_transactions; j += total_threads)
-//         {
-//             Transaction tempTrans = working->temp_transaction[j];
-//             int total_subtree_util = tempTrans.utility;
-//             int count = 0;
-//             // Count how many items survive filtering.
-//             for (int k = 0; k < tempTrans.length; k++)
-//             {
-//                 int idx = find_item(working->local_util, work_item->max_item * scale, tempTrans.data[k].key);
-//                 if (idx == -1)
-//                     continue;
-//                 if (working->local_util[idx].util >= min_util)
-//                 {
-//                     count++;
-//                     total_subtree_util += tempTrans.data[k].util;
-//                 }
-//             }
-//             if (count == 0)
-//                 continue;
-
-//             int n_trans_idx = atomicAdd(&working->db->numTransactions, 1);
-//             Transaction &newTrans = working->db->d_transactions[n_trans_idx];
-
-//             int start = atomicAdd(&working->db->numItems, count);
-//             newTrans.data = working->db->d_data + start;
-//             newTrans.length = count;
-//             newTrans.utility = tempTrans.utility;
-
-//             int item_idx = 0;
-//             int temp_util = 0;
-//             for (int k = 0; k < tempTrans.length; k++)
-//             {
-//                 int idx = find_item(working->local_util, work_item->max_item * scale, tempTrans.data[k].key);
-//                 if (idx == -1)
-//                     continue;
-//                 if (working->local_util[idx].util >= min_util)
-//                 {
-//                     newTrans.data[item_idx++] = tempTrans.data[k];
-//                     add_bucket_util(working->subtree_util,
-//                                     work_item->max_item * scale,
-//                                     tempTrans.data[k].key,
-//                                     total_subtree_util - temp_util);
-//                     temp_util += tempTrans.data[k].util;
-//                 }
-//             }
-
-//             // Linear probing to merge transactions.
-//             int hash_idx = items_hasher(newTrans.data, newTrans.length, working->db->numTransactions * scale);
-//             while (true)
-//             {
-//                 int old = atomicCAS(&working->hashes[hash_idx], -1, n_trans_idx);
-//                 if (old == -1)
-//                 {
-//                     break;
-//                 }
-//                 // If the transactions have the same key pattern, merge them.
-//                 if (working->db->sameKey(old, n_trans_idx))
-//                 {
-//                     Transaction &oldTran = working->db->d_transactions[old];
-//                     atomicAdd(&oldTran.utility, newTrans.utility);
-//                     for (int k = 0; k < oldTran.length; k++)
-//                     {
-//                         atomicAdd(&oldTran.data[k].util, newTrans.data[k].util);
-//                     }
-//                     // Mark this transaction as merged.
-//                     newTrans.data = nullptr;
-//                     newTrans.length = 0;
-//                     newTrans.utility = 0;
-//                     break;
-//                 }
-//                 // Linear probing.
-//                 hash_idx = (hash_idx + 1) % (working->db->numTransactions * scale);
-//             }
-//         }
-
-
-//         grid.sync();
-
-//         // Update max_item and primary_count in parallel.
-//         if (tid < 32)
-//         {
-//             for (int j = tid; j < work_item->max_item * scale; j += total_threads)
-//             {
-//                 if (working->local_util[j].util >= min_util)
-//                     atomicAdd(&working->max_item, 1);
-//                 Item curr = working->subtree_util[j];
-//                 if (curr.util >= min_util)
-//                 {
-//                     working->subtree_util[atomicAdd(&working->primary_count, 1)] = curr;
-//                 }
-//             }
-
-//             // Compaction
-//             for (int j = tid; j < working->db->numTransactions; j += total_threads)
-//             {
-//                 Transaction curr = working->db->d_transactions[j];
-//                 if (curr.data != nullptr)
-//                 {
-//                     working->db->d_transactions[atomicAdd(&working->compact_index, 1)] = curr;
-//                 }
-//             }
-
-//         }
-
-//         grid.sync();
-
-//         if (tid == 0)
-//         {
-//             working->db->numTransactions = working->compact_index;
-//             // printDatabase(working->db);
-//             // printf("Max Item: %d\n", working->max_item);
-//             // printf("Primary Count: %d\n", working->primary_count);
-//             // printf("Compact Index: %d\n", working->compact_index);
-//             // printf("Utility: %d\n", working->utility);
-
-//             // printf("Subtree Util: ");
-//             // printBucketUtil(working->subtree_util, working->primary_count * scale);
-
-
-//             // work_item->max_item = working->max_item;
-//             // work_item->work_count = working->primary_count;
-
-//             // for (int j = 0; j < working->primary_count; j++)
-//             // {
-//             //     work_item->primary = working->subtree_util[j].key;
-//             //     stack->push(*work_item);
-//             // }
-
-//             // global_free(working->db->d_data);
-//             // global_free(working->db->d_transactions);
-//             // global_free(working->db);
-//             // printf("\n\n\n");
-            
-//         }
-
-//         grid.sync();
-
-
-        
-
-//     }
-// }
+}

@@ -32,12 +32,13 @@ struct tempWork
     int num_items; // Initial Scan total item count (Upper Bound)
     int num_transactions; // Initial Scan total transaction count (Upper Bound)
 
-    int max_item; // Maximum Item in Local Utility
-    int primary_count; // Number of Primary Items
+    // Done on Kernel Shared Memory
+    // int max_item; // Maximum Item in Local Utility
+    // int primary_count; // Number of Primary Items
+    // int compact_index;
 
     int utility; // 1-item utility
 
-    int compact_index;
 
     Database *db;
 
