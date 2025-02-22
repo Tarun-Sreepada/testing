@@ -18,12 +18,10 @@
 #define GIGA KILO *MEGA
 
 #define page_size (128 * KILO)
-#define total_memory (4 * GIGA)
-
+#define total_memory (2 * GIGA)
 
 // make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 // make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
-
 __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item, int *primary, int primary_size)
 {
     int tid = threadIdx.x;
@@ -64,15 +62,6 @@ __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item,
 
     __syncthreads();
 
-    // memcpy(item.db->d_data, work_item->db->d_data, sizeof(Item) * work_item->db->numItems);
-
-    // for (int i = 0; i < work_item->db->numTransactions; i++)
-    // {
-    //     item.db->d_transactions[i].data = item.db->d_data + (work_item->db->d_transactions[i].data - work_item->db->d_data);
-    //     item.db->d_transactions[i].utility = 0;
-    //     item.db->d_transactions[i].length = work_item->db->d_transactions[i].length;
-    // }
-
     if (tid == 0)
     {
         for (int i = 0; i < primary_size; i++)
@@ -81,7 +70,6 @@ __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item,
             curr_work_queue->push(item);
         }
     }
-   
 }
 
 std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::unordered_map<int, std::string> rename)
@@ -113,23 +101,7 @@ std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::uno
             high_utility_patterns_str += rename[high_utility_patten[j]] + " ";
         }
 
-        //
-
-        // Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
-        if (Patterns.find(high_utility_patterns_str) == Patterns.end())
-        {
-            Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
-        }
-        else
-        {
-            duplicate++;
-            // print old util and new util
-            // std::cout << "Old: " << Patterns[high_utility_patterns_str] << " New: " << high_utility_patten[high_utility_patten.size() - 1] << "\n";
-            if (Patterns[high_utility_patterns_str] == high_utility_patten[high_utility_patten.size() - 1])
-            {
-                util_dup++;
-            }
-        }
+        Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
 
         high_utility_patterns_str = "";
         high_utility_patten.clear();
@@ -139,14 +111,35 @@ std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::uno
 
 int main(int argc, char *argv[])
 {
+    cudaError_t cudaErr;
+
+    cudaDeviceProp deviceProp;
+    cudaErr = cudaGetDeviceProperties(&deviceProp, 0);
+    if (cudaErr != cudaSuccess)
+    {
+        std::cerr << "Error: " << cudaGetErrorString(cudaErr) << std::endl;
+        return 1;
+    }
+
+    // Calculate the theoretical max concurrent threads
+    int maxConcurrentThreads = deviceProp.multiProcessorCount * deviceProp.maxThreadsPerMultiProcessor;
+
+    std::cout << "Device " << 0 << ": " << deviceProp.name << std::endl;
+    std::cout << "Number of SMs: " << deviceProp.multiProcessorCount << std::endl;
+    std::cout << "Max threads per SM: " << deviceProp.maxThreadsPerMultiProcessor << std::endl;
+    std::cout << "Theoretical max concurrent threads: "
+              << maxConcurrentThreads << std::endl;
+
+    int block_count = maxConcurrentThreads / deviceProp.maxThreadsPerBlock;
+    std::cout << "Block count: " << maxConcurrentThreads / threads << std::endl;
 
     // increase cuda stack size
     // cudaDeviceSetLimit(cudaLimitStackSize, 32 * 1024);
     // Make CPU not poll
-    cudaError_t err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
-    if (err != cudaSuccess)
+    cudaErr = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+    if (cudaErr != cudaSuccess)
     {
-        fprintf(stderr, "Failed to set device flags: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "Failed to set device flags: %s\n", cudaGetErrorString(cudaErr));
         return -1;
     }
 
@@ -161,7 +154,6 @@ int main(int argc, char *argv[])
         // Parsing failed; exit the program
         return EXIT_FAILURE;
     }
-
 
     timer.recordPoint("Start");
     ReadFileResult fileResult = read_file(args.filename, args.separator, args.utility);
@@ -184,8 +176,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < key.size(); i++)
         {
             items.push_back({key[i], val[i]});
+            // std::cout << key[i] << ":" << val[i] << " ";
         }
         end.push_back(items.size());
+        // std::cout << "\n";
     }
 
     int32_t *d_high_utility_patterns;
@@ -195,18 +189,19 @@ int main(int argc, char *argv[])
 
     init_global_allocator(total_memory, 0);
 
+    std::cout << "Number of Transactions: " << start.size() << "\n";
     // CudaMemoryManager *mm = createCudaMemoryManager(total_memory, page_size);
     // std::cout << "Memory Manager Initialized\n";
 
-    AtomicWorkStack *curr_work_queue;
-    cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
-    curr_work_queue->init();
+    AtomicWorkStack *stack;
+    cudaMallocManaged(&stack, sizeof(AtomicWorkStack));
+    stack->init();
 
     WorkItem *work_item;
     cudaMallocManaged(&work_item, sizeof(WorkItem));
     work_item->pattern = nullptr;
     work_item->pattern_length = 0;
-    work_item->work_count = primary.size();
+    // work_item->work_count = primary.size();
     work_item->max_item = max_item;
     work_item->work_done = nullptr;
 
@@ -229,31 +224,105 @@ int main(int argc, char *argv[])
     }
 
     work_item->db = db;
+    work_item->max_item = max_item;
+
+    tempWork *working;
+    cudaMallocManaged(&working, sizeof(tempWork));
+    // cudaMallocManaged(&working->db, sizeof(Database));
+
+    cudaMallocManaged(&working->temp_transaction, sizeof(Transaction) * db->numTransactions);
+    cudaMallocManaged(&working->local_util, sizeof(Item) * max_item * scale);
+    cudaMallocManaged(&working->hashes, sizeof(int) * db->numTransactions * scale);
+    cudaMallocManaged(&working->subtree_util, sizeof(Item) * max_item * scale);
 
     int *d_primary;
     cudaMallocManaged(&d_primary, primary.size() * sizeof(int));
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
-    copy_work<<<1, threads>>>(curr_work_queue, work_item, d_primary, primary.size());
-    cudaDeviceSynchronize();
-    timer.recordPoint("Data Copy to GPU");
+    int num_primary = primary.size();
+    void *kernelArgs[] = {
+        // Must match the kernel signature order:
+        (void *)&work_item,
+        (void *)&working,
+        (void *)&d_primary,
+        (void *)&num_primary,
+        (void *)&stack,
+        (void *)&d_high_utility_patterns,
+        (void *)&args.utility};
 
-    cudaFree(d_primary);
-    cudaFree(db->d_data);
-    cudaFree(db->d_transactions);
-    cudaFree(db);
+    // initial_mine
+    // cudaLaunchCooperativeKernel
+    cudaErr = cudaLaunchCooperativeKernel(
+        (void *)initial_mine, blocks, threads, kernelArgs);
 
-    cudaError_t cudaStatus;
-
-    while (curr_work_queue->active > 0)
+    if (cudaErr != cudaSuccess)
     {
-        printf("Top: %d\n", curr_work_queue->active);
-        test<<<blocks, threads>>>(curr_work_queue, d_high_utility_patterns, args.utility);
+        fprintf(stderr, "kernel launch failed: %s\n", cudaGetErrorString(cudaErr));
+        return -1;
+    }
+
+    cudaDeviceSynchronize();
+
+    // int i = 0;
+    // for(auto &item : primary)
+    // {
+    //     temp->num_transactions = 0;
+    //     temp->num_items = 0;
+    //     temp->num_transactions = 0;
+    //     temp->utility = 0;
+    //     temp->pattern_length = 0;
+    //     temp->pattern = nullptr;
+    //     temp->max_item = 0;
+    //     temp->counter = 0;
+
+    //     memset(temp->local_util, 0, sizeof(Item) * max_item * scale);
+    //     memset(temp->temp_transaction, 0, sizeof(Transaction) * start.size());
+    //     memset(temp->hashes, -1, sizeof(int) * db->numTransactions * scale);
+    //     memset(temp->subtree_util, 0, sizeof(Item) * max_item * scale);
+
+    //     printf("%d:Item: %d\n",i, item);
+
+    //     work_item->primary = item;
+    //     // printf("Scanning\n");
+    //     scan<<<((work_item->db->numTransactions + threads) / threads),threads>>>(work_item, temp);
+    //     cudaDeviceSynchronize();
+
+    //     if(temp->utility >= args.utility)
+    //     {
+    //         d_high_utility_patterns[0] += 1;
+    //         int index = d_high_utility_patterns[1];
+    //         d_high_utility_patterns[1] += 1 + 2;
+    //         d_high_utility_patterns[index] = item;
+    //         d_high_utility_patterns[index + 1] = temp->utility;
+    //     }
+
+    //     if (temp->num_transactions == 0) continue;
+
+    //     // printf("Copying\n");
+
+    //     allocate<<<1,1>>>(work_item, temp);
+    //     cudaDeviceSynchronize();
+
+    //     // printf("Copying Done\n");
+    //     project_trim<<<((work_item->db->numTransactions + threads) / threads),threads>>>(work_item, temp, args.utility);
+    //     cudaDeviceSynchronize();
+
+    //     // printf("Project Trim Done\n");
+    //     finalize<<<1,32>>>(stack, work_item, temp, args.utility);
+    //     cudaDeviceSynchronize();
+    //     // printf("\n\n");
+    //     i++;
+    // }
+
+    // while (curr_work_queue->active > 0)
+    {
+        printf("Top: %d\n", stack->active);
+        // mine<<<blocks, threads>>>(stack, d_high_utility_patterns, args.utility);
         // print last error
-        cudaStatus = cudaGetLastError();
-        if (cudaStatus != cudaSuccess)
+        cudaErr = cudaGetLastError();
+        if (cudaErr != cudaSuccess)
         {
-            fprintf(stderr, "kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+            fprintf(stderr, "kernel launch failed: %s\n", cudaGetErrorString(cudaErr));
             return -1;
         }
 
@@ -265,10 +334,10 @@ int main(int argc, char *argv[])
     // timer
     cudaFree(d_high_utility_patterns);
 
-    // for (const auto &p : Patterns)
-    // {
-    //     std::cout << p.first << "UTIL: " << p.second << std::endl;
-    // }
+    for (const auto &p : Patterns)
+    {
+        std::cout << p.first << "UTIL: " << p.second << std::endl;
+    }
 
     std::cout << "High Utility Patterns: " << Patterns.size() << "\n";
 

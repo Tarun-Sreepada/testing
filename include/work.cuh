@@ -2,10 +2,10 @@
 #include <cstdint>
 #include "database.cuh"
 
-#define CAPACITY (1024 * 1024)
+#define CAPACITY (64 * 1024)
 
-
-struct WorkItem {
+struct WorkItem
+{
 
     int *pattern;
     int pattern_length;
@@ -20,48 +20,75 @@ struct WorkItem {
 
     int *work_done;
     int work_count;
+};
+
+struct tempWork
+{
+    Transaction *temp_transaction; // Initial Scan
+    Item *local_util; // Local Utility
+    Item *subtree_util; // Subtree Utility
+    int *hashes; // For merging
+
+    int num_items; // Initial Scan total item count (Upper Bound)
+    int num_transactions; // Initial Scan total transaction count (Upper Bound)
+
+    int max_item; // Maximum Item in Local Utility
+    int primary_count; // Number of Primary Items
+
+    int utility; // 1-item utility
+
+    int compact_index;
+
+    Database *db;
 
 };
 
-
-struct AtomicWorkStack {
+struct AtomicWorkStack
+{
     WorkItem items[CAPACITY];
     volatile unsigned int top;    // Points to the next free slot
     volatile unsigned int active; // Keeps track of active tasks
     int lock;                     // 0 = unlocked, 1 = locked
 
-    __device__ __host__ void init() {
+    __device__ __host__ void init()
+    {
         top = 0;
         active = 0;
         lock = 0;
         memset(items, 0, sizeof(items));
     }
 
-    __host__ void init_host() {
+    __host__ void init_host()
+    {
         top = 0;
         active = 0;
         lock = 0;
     }
 
     // Device-side spinlock using atomicCAS
-    __device__ void acquire_lock() {
-        while (atomicCAS(&lock, 0, 1) != 0) {
+    __device__ void acquire_lock()
+    {
+        while (atomicCAS(&lock, 0, 1) != 0)
+        {
             // Busy-wait
         }
     }
 
-    __device__ void release_lock() {
+    __device__ void release_lock()
+    {
         atomicExch(&lock, 0);
     }
 
     // Push a work item onto the stack (LIFO)
-    __device__ bool push(WorkItem item) {
+    __device__ bool push(WorkItem item)
+    {
         bool success = false;
         acquire_lock();
-        if (top < CAPACITY) {  // Check if stack is not full
+        if (top < CAPACITY)
+        { // Check if stack is not full
             items[top] = item;
             top = top + 1;
-            __threadfence();  // Ensure memory ordering
+            __threadfence(); // Ensure memory ordering
             atomicAdd((unsigned int *)&active, 1);
             success = true;
         }
@@ -69,23 +96,40 @@ struct AtomicWorkStack {
         return success;
     }
 
+    __host__ bool host_push(WorkItem item)
+    {
+        bool success = false;
+        if (top < CAPACITY)
+        { // Check if stack is not full
+            items[top] = item;
+            top = top + 1;
+            active = active + 1;
+            success = true;
+        }
+        return success;
+    }
+
     // Pop a work item from the stack (LIFO)
-    __device__ bool pop(WorkItem *item) {
+    __device__ bool pop(WorkItem *item)
+    {
         bool success = false;
         acquire_lock();
-        if (top > 0) {  // Check if stack is not empty
+        if (top > 0)
+        { // Check if stack is not empty
             top = top - 1;
             *item = items[top];
-            __threadfence();  // Ensure memory ordering
+            __threadfence(); // Ensure memory ordering
             success = true;
         }
         release_lock();
         return success;
     }
 
-    __host__ bool host_pop(WorkItem *item) {
+    __host__ bool host_pop(WorkItem *item)
+    {
         bool success = false;
-        if (top > 0) {  // Check if stack is not empty
+        if (top > 0)
+        { // Check if stack is not empty
             top = top - 1;
             *item = items[top];
             success = true;
@@ -93,12 +137,14 @@ struct AtomicWorkStack {
         return success;
     }
 
-    __device__ int get_active() {
+    __device__ int get_active()
+    {
         return active;
     }
 
     // Mark a task as finished (decrement 'active')
-    __device__ void finish_task() {
+    __device__ void finish_task()
+    {
         atomicSub((unsigned int *)&active, 1);
     }
 };

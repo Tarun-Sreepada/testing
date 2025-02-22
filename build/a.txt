@@ -1,0 +1,90 @@
+Booted Gallatin with 9 trees in range 16-4096 and 3.000000 GB of memory 192 segments
+Number of Transactions: 5
+Item: 1
+Item: 2
+Item: 6
+Item: 5
+Item: 7
+Item: 4
+Item: 3
+Top: 19
+a UTIL: 20
+a b UTIL: 9
+a b c UTIL: 10
+a b e UTIL: 12
+a b e c UTIL: 13
+a c UTIL: 28
+a d UTIL: 24
+a d b UTIL: 21
+a d b c UTIL: 22
+a d b e UTIL: 24
+a d b e c UTIL: 25
+a d c UTIL: 26
+a d e UTIL: 20
+a d e c UTIL: 21
+a e UTIL: 24
+a e c UTIL: 31
+b UTIL: 24
+b c UTIL: 33
+b e UTIL: 36
+b e c UTIL: 45
+c UTIL: 16
+d UTIL: 26
+d b UTIL: 44
+d b c UTIL: 51
+d b e UTIL: 53
+d b e c UTIL: 60
+d c UTIL: 34
+d e UTIL: 33
+d e c UTIL: 40
+e UTIL: 18
+e c UTIL: 33
+f UTIL: 5
+f a UTIL: 10
+f a b UTIL: 14
+f a b c UTIL: 15
+f a b e UTIL: 17
+f a b e c UTIL: 18
+f a c UTIL: 11
+f a d UTIL: 22
+f a d b UTIL: 26
+f a d b c UTIL: 27
+f a d b e UTIL: 29
+f a d b e c UTIL: 30
+f a d c UTIL: 23
+f a d e UTIL: 25
+f a d e c UTIL: 26
+f a e UTIL: 13
+f a e c UTIL: 14
+f b UTIL: 9
+f b c UTIL: 10
+f b e UTIL: 12
+f b e c UTIL: 13
+f c UTIL: 6
+f d UTIL: 17
+f d b UTIL: 21
+f d b c UTIL: 22
+f d b e UTIL: 24
+f d b e c UTIL: 25
+f d c UTIL: 18
+f d e UTIL: 20
+f d e c UTIL: 21
+f e UTIL: 8
+f e c UTIL: 9
+g UTIL: 7
+g a UTIL: 15
+g a c UTIL: 21
+g a e UTIL: 21
+g a e c UTIL: 27
+g b UTIL: 6
+g b c UTIL: 8
+g b e UTIL: 9
+g b e c UTIL: 11
+g c UTIL: 15
+g e UTIL: 16
+g e c UTIL: 24
+High Utility Patterns: 75
+Start: 0 ms
+File Read: 0 ms
+Kernel Execution: 559 ms
+Total time: 559 ms
