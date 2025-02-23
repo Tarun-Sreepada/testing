@@ -1,3 +1,4 @@
+
 #include <cuda_runtime.h>
 #include <iostream>
 #include <fstream>
@@ -17,10 +18,12 @@
 #define GIGA KILO *MEGA
 
 #define page_size (128 * KILO)
-#define total_memory (6 * GIGA)
+#define total_memory (5 * GIGA)
+
 
 // make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 // make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
+
 __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item, int *primary, int primary_size)
 {
     int tid = threadIdx.x;
@@ -61,6 +64,7 @@ __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item,
 
     __syncthreads();
 
+
     if (tid == 0)
     {
         for (int i = 0; i < primary_size; i++)
@@ -69,6 +73,7 @@ __global__ void copy_work(AtomicWorkStack *curr_work_queue, WorkItem *work_item,
             curr_work_queue->push(item);
         }
     }
+   
 }
 
 std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::unordered_map<int, std::string> rename)
@@ -100,7 +105,23 @@ std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::uno
             high_utility_patterns_str += rename[high_utility_patten[j]] + " ";
         }
 
-        Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
+        //
+
+        // Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
+        if (Patterns.find(high_utility_patterns_str) == Patterns.end())
+        {
+            Patterns[high_utility_patterns_str] = high_utility_patten[high_utility_patten.size() - 1];
+        }
+        else
+        {
+            duplicate++;
+            // print old util and new util
+            // std::cout << "Old: " << Patterns[high_utility_patterns_str] << " New: " << high_utility_patten[high_utility_patten.size() - 1] << "\n";
+            if (Patterns[high_utility_patterns_str] == high_utility_patten[high_utility_patten.size() - 1])
+            {
+                util_dup++;
+            }
+        }
 
         high_utility_patterns_str = "";
         high_utility_patten.clear();
@@ -110,35 +131,19 @@ std::map<std::string, int> parse_patterns(int *d_high_utility_patterns, std::uno
 
 int main(int argc, char *argv[])
 {
-    cudaError_t cudaErr;
+    cudaError_t cudaStatus;
 
-    cudaDeviceProp deviceProp;
-    cudaErr = cudaGetDeviceProperties(&deviceProp, 0);
-    if (cudaErr != cudaSuccess)
-    {
-        std::cerr << "Error: " << cudaGetErrorString(cudaErr) << std::endl;
-        return 1;
-    }
-
-    // Calculate the theoretical max concurrent threads
-    int maxConcurrentThreads = deviceProp.multiProcessorCount * deviceProp.maxThreadsPerMultiProcessor;
-
-    std::cout << "Device " << 0 << ": " << deviceProp.name << std::endl;
-    std::cout << "Number of SMs: " << deviceProp.multiProcessorCount << std::endl;
-    std::cout << "Max threads per SM: " << deviceProp.maxThreadsPerMultiProcessor << std::endl;
-    std::cout << "Theoretical max concurrent threads: "
-              << maxConcurrentThreads << std::endl;
-
-    int block_count = maxConcurrentThreads / deviceProp.maxThreadsPerBlock;
-    std::cout << "Block count: " << maxConcurrentThreads / threads << std::endl;
+    int gpu_max_shared_mem;
+    cudaDeviceGetAttribute(&gpu_max_shared_mem, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0);
+    std::cout << "Max Shared Memory: " << gpu_max_shared_mem << " Bytes\n";
 
     // increase cuda stack size
     // cudaDeviceSetLimit(cudaLimitStackSize, 32 * 1024);
     // Make CPU not poll
-    cudaErr = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
-    if (cudaErr != cudaSuccess)
+    cudaError_t err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+    if (err != cudaSuccess)
     {
-        fprintf(stderr, "Failed to set device flags: %s\n", cudaGetErrorString(cudaErr));
+        fprintf(stderr, "Failed to set device flags: %s\n", cudaGetErrorString(err));
         return -1;
     }
 
@@ -153,6 +158,7 @@ int main(int argc, char *argv[])
         // Parsing failed; exit the program
         return EXIT_FAILURE;
     }
+
 
     timer.recordPoint("Start");
     ReadFileResult fileResult = read_file(args.filename, args.separator, args.utility);
@@ -169,16 +175,47 @@ int main(int argc, char *argv[])
     std::vector<int> start;
     std::vector<int> end;
 
+    int max_size = 0;
     for (const auto &[key, val] : filteredTransactions)
     {
+        max_size = std::max(max_size, (int)key.size());
         start.push_back(items.size());
         for (int i = 0; i < key.size(); i++)
         {
             items.push_back({key[i], val[i]});
-            // std::cout << key[i] << ":" << val[i] << " ";
         }
         end.push_back(items.size());
-        // std::cout << "\n";
+    }
+    std::cout << "Largest Transaction: " << max_size << "\n";
+
+    /*
+        // Use shared memory only for values that one block will process together.
+    __shared__ WorkItem work_item; // the work-item popped from the queue
+    __shared__ bool s_popped;      // did we successfully pop a work-item?
+
+    // Shared copies for data that one block uses to process the work-item.
+    __shared__ WorkItem new_work_item;
+    __shared__ Transaction *temp_transaction;
+    __shared__ Item *local_util;
+    __shared__ int num_items;
+    __shared__ int num_transactions;
+
+    __shared__ int *hashes;
+    __shared__ Item *subtree_util;
+    __shared__ int max_item;
+    __shared__ int primary_count;
+    */
+
+    int shared_mem_req = max_item * sizeof(Utils) * scale // for local_util
+                        // + max_size * sizeof(Transaction) // for temp_transaction
+                        + KILO; // for other variables
+
+    std::cout << "Shared Memory Required: " << shared_mem_req << " Bytes\n";
+
+    if (shared_mem_req > gpu_max_shared_mem) {
+        std::cout << "Requested shared memory exceeds GPU max;\n";
+        // shared_mem_req = gpu_max_shared_mem;
+        return -1;
     }
 
     int32_t *d_high_utility_patterns;
@@ -188,19 +225,18 @@ int main(int argc, char *argv[])
 
     init_global_allocator(total_memory, 0);
 
-    std::cout << "Number of Transactions: " << start.size() << "\n";
     // CudaMemoryManager *mm = createCudaMemoryManager(total_memory, page_size);
     // std::cout << "Memory Manager Initialized\n";
 
-    AtomicWorkStack *stack;
-    cudaMallocManaged(&stack, sizeof(AtomicWorkStack));
-    stack->init();
+    AtomicWorkStack *curr_work_queue;
+    cudaMallocManaged(&curr_work_queue, sizeof(AtomicWorkStack));
+    curr_work_queue->init();
 
     WorkItem *work_item;
     cudaMallocManaged(&work_item, sizeof(WorkItem));
     work_item->pattern = nullptr;
     work_item->pattern_length = 0;
-    // work_item->work_count = primary.size();
+    work_item->work_count = primary.size();
     work_item->max_item = max_item;
     work_item->work_done = nullptr;
 
@@ -223,80 +259,31 @@ int main(int argc, char *argv[])
     }
 
     work_item->db = db;
-    work_item->max_item = max_item;
-
-    tempWork *working;
-    cudaMallocManaged(&working, sizeof(tempWork));
-    // cudaMallocManaged(&working->db, sizeof(Database));
-
-    cudaMalloc(&working->temp_transaction, sizeof(Transaction) * db->numTransactions);
-    cudaMalloc(&working->local_util, sizeof(Item) * max_item * scale);
-    cudaMalloc(&working->hashes, sizeof(int) * db->numTransactions * scale);
-    cudaMalloc(&working->subtree_util, sizeof(Item) * max_item * scale);
 
     int *d_primary;
-    cudaMalloc(&d_primary, primary.size() * sizeof(int));
+    cudaMallocManaged(&d_primary, primary.size() * sizeof(int));
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
+    copy_work<<<1, threads>>>(curr_work_queue, work_item, d_primary, primary.size());
+    cudaDeviceSynchronize();
+    timer.recordPoint("Data Copy to GPU");
 
-    // int i = 0;
-    // for(auto &item : primary
-    for (int i = 0; i < primary.size(); i++)
+    cudaFree(d_primary);
+    cudaFree(db->d_data);
+    cudaFree(db->d_transactions);
+    cudaFree(db);
+
+
+
+    while (curr_work_queue->active > 0)
     {
-        int item = primary[i];
-
-        work_item->primary = item;
-        // printf("Scanning\n");
-
-        working->num_transactions = 0;
-        working->num_items = 0;
-        working->utility = 0;
-
-        cudaMemset(working->local_util, 0, sizeof(Item) * max_item * scale);
-        cudaMemset(working->temp_transaction, 0, sizeof(Transaction) * start.size());
-        cudaMemset(working->hashes, -1, sizeof(int) * db->numTransactions * scale);
-        cudaMemset(working->subtree_util, 0, sizeof(Item) * max_item * scale);
-    
-
-        scan<<<((work_item->db->numTransactions + threads) / threads),threads>>>(work_item, working);
-        cudaDeviceSynchronize();
-
-        printf("%d:Item: %d\tUtility: %d\n", i, item, working->utility);
-        if (working->utility >= args.utility)
-        {
-            d_high_utility_patterns[0] += 1;
-            int index = d_high_utility_patterns[1];
-            d_high_utility_patterns[1] += 3;
-            d_high_utility_patterns[index] = item;
-            d_high_utility_patterns[index + 1] = working->utility;
-        }
-
-        if (working->num_transactions == 0) continue;
-
-    //     // printf("Copying\n");
-
-        allocate<<<1,1>>>(working);
-        cudaDeviceSynchronize();
-
-        trim_project<<<((working->num_transactions + threads) / threads),threads>>>(work_item, working, args.utility);
-        cudaDeviceSynchronize();
-
-    //     // printf("Project Trim Done\n");
-        finalize<<<1,32>>>(stack, work_item, working, args.utility);
-        cudaDeviceSynchronize();
-    //     // printf("\n\n");
-    //     i++;
-    }
-
-    while (stack->active > 0)
-    {
-        printf("Top: %d\n", stack->active);
-        mine<<<blocks, threads>>>(stack, d_high_utility_patterns, args.utility);
+        printf("Top: %d\n", curr_work_queue->active);
+        test<<<blocks, threads,shared_mem_req>>>(curr_work_queue, d_high_utility_patterns, args.utility);
         // print last error
-        cudaErr = cudaGetLastError();
-        if (cudaErr != cudaSuccess)
+        cudaStatus = cudaGetLastError();
+        if (cudaStatus != cudaSuccess)
         {
-            fprintf(stderr, "kernel launch failed: %s\n", cudaGetErrorString(cudaErr));
+            fprintf(stderr, "kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
             return -1;
         }
 

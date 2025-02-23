@@ -19,6 +19,13 @@ struct Item
     int util;
 };
 
+struct Utils
+{
+    int key;
+    int local_util;
+    int subtree_util;
+};
+
 __device__ uint32_t items_hasher(const Item *items, int n, int tableSize)
 {
     uint32_t hash = 0;
@@ -32,15 +39,15 @@ Item *items: array of items
 int n: size of the array
 int key: key to search
 */
-__device__ int find_item(const Item *items, int n, int key)
+__device__ int find_item(const Utils *lu_su, int n, int key)
 {
     uint32_t hash = hashFunction(key, n);
 
     while (true)
     {
-        if (items[hash].key == key)
+        if (lu_su[hash].key == key)
             return hash;
-        if (items[hash].key == 0)
+        if (lu_su[hash].key == 0)
             return -1;
         hash = (hash + 1) % n;
     }

@@ -1,90 +1,183 @@
-Booted Gallatin with 9 trees in range 16-4096 and 3.000000 GB of memory 192 segments
-Number of Transactions: 5
-Item: 1
-Item: 2
-Item: 6
-Item: 5
-Item: 7
-Item: 4
-Item: 3
-Top: 19
-a UTIL: 20
-a b UTIL: 9
-a b c UTIL: 10
-a b e UTIL: 12
-a b e c UTIL: 13
-a c UTIL: 28
-a d UTIL: 24
-a d b UTIL: 21
-a d b c UTIL: 22
-a d b e UTIL: 24
-a d b e c UTIL: 25
-a d c UTIL: 26
-a d e UTIL: 20
-a d e c UTIL: 21
-a e UTIL: 24
-a e c UTIL: 31
-b UTIL: 24
-b c UTIL: 33
-b e UTIL: 36
-b e c UTIL: 45
-c UTIL: 16
-d UTIL: 26
-d b UTIL: 44
-d b c UTIL: 51
-d b e UTIL: 53
-d b e c UTIL: 60
-d c UTIL: 34
-d e UTIL: 33
-d e c UTIL: 40
-e UTIL: 18
-e c UTIL: 33
-f UTIL: 5
-f a UTIL: 10
-f a b UTIL: 14
-f a b c UTIL: 15
-f a b e UTIL: 17
-f a b e c UTIL: 18
-f a c UTIL: 11
-f a d UTIL: 22
-f a d b UTIL: 26
-f a d b c UTIL: 27
-f a d b e UTIL: 29
-f a d b e c UTIL: 30
-f a d c UTIL: 23
-f a d e UTIL: 25
-f a d e c UTIL: 26
-f a e UTIL: 13
-f a e c UTIL: 14
-f b UTIL: 9
-f b c UTIL: 10
-f b e UTIL: 12
-f b e c UTIL: 13
-f c UTIL: 6
-f d UTIL: 17
-f d b UTIL: 21
-f d b c UTIL: 22
-f d b e UTIL: 24
-f d b e c UTIL: 25
-f d c UTIL: 18
-f d e UTIL: 20
-f d e c UTIL: 21
-f e UTIL: 8
-f e c UTIL: 9
-g UTIL: 7
-g a UTIL: 15
-g a c UTIL: 21
-g a e UTIL: 21
-g a e c UTIL: 27
-g b UTIL: 6
-g b c UTIL: 8
-g b e UTIL: 9
-g b e c UTIL: 11
-g c UTIL: 15
-g e UTIL: 16
-g e c UTIL: 24
+Max Shared Memory: 101376 Bytes
+Largest Transaction: 6
+Shared Memory Required: 1288 Bytes
+Booted Gallatin with 9 trees in range 16-4096 and 4.000000 GB of memory 256 segments
+Top: 7
+Transaction: 0
+Transaction: 1
+Transaction: 3
+Pattern Count:0
+Transaction: 0
+Transaction: 1
+Transaction: 2
+Pattern Count:1
+Transaction: 0
+Pattern Count:2
+Transaction: 0
+Pattern Count:3
+Transaction: 0
+Pattern Count:4
+Transaction: 0
+Pattern Count:5
+Transaction: 0
+Transaction: 1
+Pattern Count:6
+Transaction: 0
+Pattern Count:7
+Transaction: 0
+Transaction: 2
+Pattern Count:8
+Transaction: 0
+Pattern Count:9
+Transaction: 0
+Pattern Count:10
+Transaction: 0
+Pattern Count:11
+Transaction: 0
+Pattern Count:12
+Transaction: 0
+Transaction: 1
+Pattern Count:13
+Transaction: 0
+Pattern Count:14
+Transaction: 0
+Pattern Count:15
+Transaction: 0
+Transaction: 3
+Transaction: 4
+Pattern Count:16
+Transaction: 0
+Transaction: 1
+Pattern Count:17
+Transaction: 0
+Pattern Count:18
+Transaction: 0
+Pattern Count:19
+Transaction: 0
+Pattern Count:20
+Transaction: 0
+Pattern Count:21
+Transaction: 0
+Pattern Count:22
+Transaction: 0
+Pattern Count:23
+Transaction: 0
+Transaction: 1
+Transaction: 2
+Transaction: 3
+Transaction: 4
+Pattern Count:24
+Transaction: 0
+Transaction: 2
+Transaction: 4
+Pattern Count:25
+Transaction: 0
+Pattern Count:26
+Transaction: 0
+Pattern Count:27
+Transaction: 0
+Pattern Count:28
+Transaction: 0
+Transaction: 1
+Transaction: 2
+Transaction: 4
+Pattern Count:29
+Transaction: 0
+Pattern Count:30
+Transaction: 1
+Transaction: 2
+Pattern Count:31
+Transaction: 0
+Transaction: 1
+Pattern Count:32
+Transaction: 1
+Pattern Count:33
+Transaction: 0
+Pattern Count:34
+Transaction: 0
+Pattern Count:35
+Transaction: 0
+Pattern Count:36
+Transaction: 0
+Transaction: 1
+Pattern Count:37
+Transaction: 0
+Pattern Count:38
+Transaction: 0
+Pattern Count:39
+Transaction: 0
+Pattern Count:40
+Transaction: 0
+Pattern Count:41
+Transaction: 0
+Pattern Count:42
+Transaction: 0
+Pattern Count:43
+Transaction: 0
+Pattern Count:44
+Transaction: 0
+Pattern Count:45
+Transaction: 0
+Pattern Count:46
+Transaction: 0
+Pattern Count:47
+Transaction: 0
+Pattern Count:48
+Transaction: 0
+Pattern Count:49
+Transaction: 0
+Pattern Count:50
+Transaction: 0
+Pattern Count:51
+Transaction: 0
+Pattern Count:52
+Transaction: 0
+Pattern Count:53
+Transaction: 0
+Pattern Count:54
+Transaction: 0
+Pattern Count:55
+Transaction: 0
+Pattern Count:56
+Transaction: 0
+Pattern Count:57
+Transaction: 0
+Pattern Count:58
+Transaction: 0
+Pattern Count:59
+Transaction: 0
+Pattern Count:60
+Transaction: 0
+Pattern Count:61
+Transaction: 0
+Pattern Count:62
+Transaction: 0
+Pattern Count:63
+Transaction: 0
+Pattern Count:64
+Transaction: 0
+Pattern Count:65
+Transaction: 0
+Pattern Count:66
+Transaction: 0
+Pattern Count:67
+Transaction: 0
+Pattern Count:68
+Transaction: 0
+Pattern Count:69
+Transaction: 0
+Pattern Count:70
+Transaction: 0
+Pattern Count:71
+Transaction: 0
+Pattern Count:72
+Transaction: 0
+Pattern Count:73
+Transaction: 0
+Pattern Count:74
 High Utility Patterns: 75
 Start: 0 ms
 File Read: 0 ms
-Kernel Execution: 559 ms
-Total time: 559 ms
+Data Copy to GPU: 126 ms
+Kernel Execution: 83 ms
+Total time: 210 ms
