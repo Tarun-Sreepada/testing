@@ -16,6 +16,17 @@
 #define LOCAL_UTIL true
 #define SUBTREE_UTIL false
 
+struct time_stuff
+{
+    uint64_t start,
+        end,
+        idle,
+        scanning,
+        memory_alloc,
+        merging,
+        push, prev, processed_count;
+};
+
 __device__ void printBucketUtil(Utils *lu_su, int max_item)
 {
     for (int i = 0; i < max_item; i++)
@@ -65,9 +76,9 @@ __device__ void add_bucket_util(Utils *lu_su, int table_size, int key, int total
     }
 }
 
-__device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
+__device__ __noinline__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 {
-    printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
+    // printf("Pattern Count:%d\n", atomicAdd(&high_utility_patterns[0], 1));
 
     int idx = atomicAdd(&high_utility_patterns[1], (wi->pattern_length + 2));
 
@@ -83,7 +94,7 @@ __device__ void add_pattern(WorkItem *wi, int *high_utility_patterns)
 
 __global__ void test(AtomicWorkStack *curr_work_queue,
                      int32_t *d_high_utility_patterns,
-                     int min_util)
+                     int min_util, time_stuff *d_time_stuff)
 {
     const int bid = blockIdx.x;
     const int tid = threadIdx.x;
@@ -104,7 +115,19 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
     __shared__ Utils *lu_su;
 
+
+    __shared__ time_stuff local_ts;
+    if (tid == 0)
+    {
+        memset(&local_ts, 0, sizeof(time_stuff));
+        local_ts.start = clock64();
+        local_ts.prev = local_ts.start;
+    }
+    __syncthreads();
+
     extern __shared__ char shared_memory[];
+
+
 
     // The outer loop: each iteration pops a new work-item from the global queue.
     while (curr_work_queue->get_active() > 0)
@@ -119,6 +142,11 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // If no work-item was popped, then skip this iteration.
         if (!s_popped)
         {
+            if (tid == 0)
+            {
+                local_ts.idle += clock64() - local_ts.prev;
+                local_ts.prev = clock64();
+            }
             __syncthreads(); // all threads must sync before next iteration
             continue;
         }
@@ -143,6 +171,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             temp_transaction = reinterpret_cast<Transaction *>(
                 global_malloc(work_item.db->numTransactions * sizeof(Transaction)));
             memset(temp_transaction, 0, work_item.db->numTransactions * sizeof(Transaction));
+
+            local_ts.memory_alloc += clock64() - local_ts.prev;
+            local_ts.prev = clock64();
         }
         __syncthreads();
 
@@ -195,6 +226,8 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // All threads wait, then thread 0 checks if the pattern qualifies:
         if (tid == 0)
         {
+            local_ts.scanning += clock64() - local_ts.prev;
+            local_ts.prev = clock64();
             // printBucketUtil(lu_su, work_item.max_item * scale);
             // printf("Num new items: %d\n", num_items);
             // printf("Num new transactions: %d\n", num_transactions);
@@ -249,6 +282,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             hashes = reinterpret_cast<int *>(
                 global_malloc(num_transactions * scale * sizeof(int)));
             memset(hashes, -1, num_transactions * scale * sizeof(int));
+
+            local_ts.memory_alloc += clock64() - local_ts.prev;
+            local_ts.prev = clock64();
         }
         __syncthreads();
 
@@ -334,6 +370,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         {
             if (tid == 0)
             {
+                local_ts.merging += clock64() - local_ts.prev;
+                local_ts.prev = clock64();
+
                 curr_work_queue->finish_task();
 
                 // Free allocated memory here if necessary.
@@ -360,19 +399,50 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         }
         __syncthreads();
 
+        if (tid == 0)
+        {
+            num_transactions = 0;
+        }
+
+        __syncthreads();
+
+        // push down empty transactions
+        if (tid < 32){
+            for(int i = tid; i < new_work_item.db->numTransactions; i += 32)
+            {
+                Transaction copy = new_work_item.db->d_transactions[i];
+                if(copy.data != nullptr)
+                {
+                    int ret = atomicAdd(&num_transactions, 1);
+                    new_work_item.db->d_transactions[ret] = copy;
+                }
+            }
+        }
+        __syncthreads();
+
+        // sort transactions based on length : TODO
+
         // (11) Compact the transactions array (this step is done serially by thread 0).
         if (tid == 0)
         {
-            int compact_index = 0;
-            for (int i = 0; i < new_work_item.db->numTransactions; i++)
-            {
-                if (new_work_item.db->d_transactions[i].data != nullptr)
-                {
-                    new_work_item.db->d_transactions[compact_index++] =
-                        new_work_item.db->d_transactions[i];
-                }
-            }
-            new_work_item.db->numTransactions = compact_index;
+            // int compact_index = 0;
+            // for (int i = 0; i < new_work_item.db->numTransactions; i++)
+            // {
+            //     if (new_work_item.db->d_transactions[i].data != nullptr)
+            //     {
+            //         new_work_item.db->d_transactions[compact_index++] =
+            //             new_work_item.db->d_transactions[i];
+            //     }
+            // }
+            // new_work_item.db->numTransactions = compact_index;
+            new_work_item.db->numTransactions = num_transactions;
+            // if (compact_index != num_transactions)
+            // {
+            //     printf("Error: compact_index: %d, num_transactions: %d\n", compact_index, num_transactions);
+            // }
+
+            local_ts.merging += clock64() - local_ts.prev;
+            local_ts.prev = clock64();
 
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
@@ -407,9 +477,19 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 global_free(work_item.db->d_transactions);
                 global_free(work_item.db);
             }
+
+            local_ts.push += clock64() - local_ts.prev;
+            local_ts.prev = clock64();
         }
         __syncthreads();
 
         // (Optional) Free allocated memory here if necessary.
+    }
+
+    if (tid == 0)
+    {
+        local_ts.idle += clock64() - local_ts.prev;
+        local_ts.end = clock64();
+        d_time_stuff[bid] = local_ts;
     }
 }
