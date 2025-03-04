@@ -10,8 +10,8 @@
 
 #define scale 2
 
-#define blocks 256
-#define threads 64
+// #define blocks 128
+// #define threads 512
 
 #define LOCAL_UTIL true
 #define SUBTREE_UTIL false
@@ -24,7 +24,10 @@ struct time_stuff
         scanning,
         memory_alloc,
         merging,
-        push, prev, processed_count;
+        push, prev, 
+        processed_count, 
+        largest_trans_scan, largest_trans_merge, 
+        tt_scan, tt_merging;
 };
 
 __device__ void printBucketUtil(Utils *lu_su, int max_item)
@@ -115,6 +118,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
     __shared__ Utils *lu_su;
 
+    __shared__ int largest_trans_scan;
+    __shared__ int largest_trans_merge;
+
 
     __shared__ time_stuff local_ts;
     if (tid == 0)
@@ -154,6 +160,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (2) Thread 0 initializes the new work item.
         if (tid == 0)
         {
+            local_ts.processed_count++;
             memset(&new_work_item, 0, sizeof(WorkItem));
 
             // Allocate and copy the pattern
@@ -174,6 +181,10 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
             local_ts.memory_alloc += clock64() - local_ts.prev;
             local_ts.prev = clock64();
+
+            largest_trans_scan = 0;
+            largest_trans_merge = 0;
+
         }
         __syncthreads();
 
@@ -181,6 +192,8 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         for (int i = tid; i < work_item.db->numTransactions; i += blockDim.x)
         {
             Transaction &oldTrans = work_item.db->d_transactions[i];
+            // atomicMax(&local_ts.largest_trans, (int)oldTrans.length);
+            atomicMax((int *)&largest_trans_scan, (int)oldTrans.length);
             int idx = oldTrans.findItem(work_item.primary);
             if (idx == -1)
                 continue;
@@ -226,8 +239,21 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // All threads wait, then thread 0 checks if the pattern qualifies:
         if (tid == 0)
         {
-            local_ts.scanning += clock64() - local_ts.prev;
-            local_ts.prev = clock64();
+            uint64_t curr_time = clock64();
+            uint64_t diff = curr_time - local_ts.prev;
+
+            local_ts.scanning += diff;
+
+            if (local_ts.tt_scan < diff)
+            {
+                local_ts.tt_scan = diff;
+                local_ts.largest_trans_scan = largest_trans_scan;
+            }
+
+
+            local_ts.prev = curr_time;
+            // local_ts.scanning += clock64() - local_ts.prev;
+            // local_ts.prev = clock64();
             // printBucketUtil(lu_su, work_item.max_item * scale);
             // printf("Num new items: %d\n", num_items);
             // printf("Num new transactions: %d\n", num_transactions);
@@ -290,7 +316,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
         for (int i = tid; i < num_transactions; i += blockDim.x)
         {
+
             Transaction tempTrans = temp_transaction[i];
+            atomicMax((int *)&largest_trans_merge, (int)tempTrans.length);
             int total_subtree_util = tempTrans.utility;
             int count = 0;
             // Count how many items survive filtering.
@@ -370,8 +398,18 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         {
             if (tid == 0)
             {
-                local_ts.merging += clock64() - local_ts.prev;
-                local_ts.prev = clock64();
+                // local_ts.merging += clock64() - local_ts.prev;
+                // local_ts.prev = clock64();
+
+                uint64_t curr_time = clock64();
+                uint64_t diff = curr_time - local_ts.prev;
+
+                local_ts.merging += diff;
+                if (local_ts.tt_merging < diff)
+                {
+                    local_ts.tt_merging = diff;
+                    local_ts.largest_trans_merge = largest_trans_merge;
+                }
 
                 curr_work_queue->finish_task();
 

@@ -3,21 +3,31 @@
 
 cmake_minimum_required(VERSION 3.5)
 
-if(EXISTS "/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt" AND EXISTS "/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitinfo.txt" AND
-  "/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt" IS_NEWER_THAN "/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitinfo.txt")
-  message(STATUS
+if(EXISTS "/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt" AND EXISTS "/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitinfo.txt" AND
+  "/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt" IS_NEWER_THAN "/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitinfo.txt")
+  message(VERBOSE
     "Avoiding repeated git clone, stamp file is up to date: "
-    "'/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt'"
+    "'/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt'"
   )
   return()
 endif()
 
+# Even at VERBOSE level, we don't want to see the commands executed, but
+# enabling them to be shown for DEBUG may be useful to help diagnose problems.
+cmake_language(GET_MESSAGE_LOG_LEVEL active_log_level)
+if(active_log_level MATCHES "DEBUG|TRACE")
+  set(maybe_show_command COMMAND_ECHO STDOUT)
+else()
+  set(maybe_show_command "")
+endif()
+
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E rm -rf "/home/tarun/testing/build/_deps/gallatin-src"
+  COMMAND ${CMAKE_COMMAND} -E rm -rf "/export/home1/ltarun/testing/build/_deps/gallatin-src"
   RESULT_VARIABLE error_code
+  ${maybe_show_command}
 )
 if(error_code)
-  message(FATAL_ERROR "Failed to remove directory: '/home/tarun/testing/build/_deps/gallatin-src'")
+  message(FATAL_ERROR "Failed to remove directory: '/export/home1/ltarun/testing/build/_deps/gallatin-src'")
 endif()
 
 # try the clone 3 times in case there is an odd git clone issue
@@ -27,13 +37,14 @@ while(error_code AND number_of_tries LESS 3)
   execute_process(
     COMMAND "/usr/bin/git"
             clone --no-checkout --config "advice.detachedHead=false" "https://github.com/saltsystemslab/gallatin.git" "gallatin-src"
-    WORKING_DIRECTORY "/home/tarun/testing/build/_deps"
+    WORKING_DIRECTORY "/export/home1/ltarun/testing/build/_deps"
     RESULT_VARIABLE error_code
+    ${maybe_show_command}
   )
   math(EXPR number_of_tries "${number_of_tries} + 1")
 endwhile()
 if(number_of_tries GREATER 1)
-  message(STATUS "Had to git clone more than once: ${number_of_tries} times.")
+  message(NOTICE "Had to git clone more than once: ${number_of_tries} times.")
 endif()
 if(error_code)
   message(FATAL_ERROR "Failed to clone repository: 'https://github.com/saltsystemslab/gallatin.git'")
@@ -42,8 +53,9 @@ endif()
 execute_process(
   COMMAND "/usr/bin/git"
           checkout "origin/main" --
-  WORKING_DIRECTORY "/home/tarun/testing/build/_deps/gallatin-src"
+  WORKING_DIRECTORY "/export/home1/ltarun/testing/build/_deps/gallatin-src"
   RESULT_VARIABLE error_code
+  ${maybe_show_command}
 )
 if(error_code)
   message(FATAL_ERROR "Failed to checkout tag: 'origin/main'")
@@ -54,20 +66,22 @@ if(init_submodules)
   execute_process(
     COMMAND "/usr/bin/git" 
             submodule update --recursive --init 
-    WORKING_DIRECTORY "/home/tarun/testing/build/_deps/gallatin-src"
+    WORKING_DIRECTORY "/export/home1/ltarun/testing/build/_deps/gallatin-src"
     RESULT_VARIABLE error_code
+    ${maybe_show_command}
   )
 endif()
 if(error_code)
-  message(FATAL_ERROR "Failed to update submodules in: '/home/tarun/testing/build/_deps/gallatin-src'")
+  message(FATAL_ERROR "Failed to update submodules in: '/export/home1/ltarun/testing/build/_deps/gallatin-src'")
 endif()
 
 # Complete success, update the script-last-run stamp file:
 #
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E copy "/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitinfo.txt" "/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt"
+  COMMAND ${CMAKE_COMMAND} -E copy "/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitinfo.txt" "/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt"
   RESULT_VARIABLE error_code
+  ${maybe_show_command}
 )
 if(error_code)
-  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '/home/tarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt'")
+  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '/export/home1/ltarun/testing/build/_deps/gallatin-subbuild/gallatin-populate-prefix/src/gallatin-populate-stamp/gallatin-populate-gitclone-lastrun.txt'")
 endif()

@@ -14,6 +14,8 @@ struct ParsedArgs {
     std::string filename;
     int utility;
     std::string separator;
+    int blocks;
+    int threads;
 };
 
 // Function to parse command-line arguments

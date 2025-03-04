@@ -16,6 +16,8 @@ struct ReadFileResult {
     std::vector<uint32_t> primary;
     std::unordered_map<int, std::string> rename;
     int max_item;
+    int blocks;
+    int threads;
 };
 
 // Function to split a string based on a delimiter

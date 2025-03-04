@@ -136,6 +136,8 @@ int main(int argc, char *argv[])
     cudaDeviceGetAttribute(&gpu_max_shared_mem, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0);
     std::cout << "Max Shared Memory: " << gpu_max_shared_mem << " Bytes\n";
 
+
+
     // increase cuda stack size
     // cudaDeviceSetLimit(cudaLimitStackSize, 32 * 1024);
     // Make CPU not poll
@@ -298,7 +300,7 @@ int main(int argc, char *argv[])
     cudaMallocManaged(&d_primary, primary.size() * sizeof(int));
     cudaMemcpy(d_primary, primary.data(), primary.size() * sizeof(int), cudaMemcpyHostToDevice);
 
-    copy_work<<<1, threads>>>(curr_work_queue, work_item, d_primary, primary.size());
+    copy_work<<<1, args.threads>>>(curr_work_queue, work_item, d_primary, primary.size());
     cudaDeviceSynchronize();
     timer.recordPoint("Data Copy to GPU");
 
@@ -308,15 +310,15 @@ int main(int argc, char *argv[])
     cudaFree(db);
 
     time_stuff *d_time_stuff;
-    cudaMallocManaged(&d_time_stuff, sizeof(time_stuff) * blocks);
-    memset(d_time_stuff, 0, sizeof(time_stuff) * blocks);
+    cudaMallocManaged(&d_time_stuff, sizeof(time_stuff) * args.blocks);
+    memset(d_time_stuff, 0, sizeof(time_stuff) * args.blocks);
 
-    cudaMemAdvise(d_time_stuff, sizeof(time_stuff) * blocks, cudaMemAdviseSetPreferredLocation, 0); // set preferred location to GPU
+    cudaMemAdvise(d_time_stuff, sizeof(time_stuff) * args.blocks, cudaMemAdviseSetPreferredLocation, 0); // set preferred location to GPU
 
     while (curr_work_queue->active > 0)
     {
         printf("Top: %d\n", curr_work_queue->active);
-        test<<<blocks, threads, shared_mem_req>>>(curr_work_queue, d_high_utility_patterns, args.utility, d_time_stuff);
+        test<<<args.blocks, args.threads, shared_mem_req>>>(curr_work_queue, d_high_utility_patterns, args.utility, d_time_stuff);
         // print last error
         cudaStatus = cudaGetLastError();
         if (cudaStatus != cudaSuccess)
@@ -367,8 +369,11 @@ int main(int argc, char *argv[])
     float max_scan_time = 0.0f;
     float min_merge_time = std::numeric_limits<float>::max();
     float max_merge_time = 0.0f;
-    
-    for (int i = 0; i < blocks; i++)
+    int min_processed_count = std::numeric_limits<int>::max();
+    int max_processed_count = 0;
+
+
+    for (int i = 0; i <args.blocks; i++)
     {
         // Calculate elapsed time for the block (if needed).
         float elapsed_time = (float)d_time_stuff[i].end - (float)d_time_stuff[i].start;
@@ -379,13 +384,23 @@ int main(int argc, char *argv[])
         float memory_time = d_time_stuff[i].memory_alloc/ (float)clock_rate;
         float scan_time   = d_time_stuff[i].scanning      / (float)clock_rate;
         float merge_time  = d_time_stuff[i].merging       / (float)clock_rate;
+        float longest_scan = d_time_stuff[i].tt_scan / (float)clock_rate;
+        float longest_merge = d_time_stuff[i].tt_merging / (float)clock_rate;
     
         // Print per-block times.
         std::cout << "Block: " << i << " Time: " << elapsed_time << " s\n";
+        std::cout << "Block: " << i << " Processed: " << d_time_stuff[i].processed_count << "\n";
         std::cout << "Block: " << i << " Idle: " << idle_time << " s\n";
         std::cout << "Block: " << i << " Memory Alloc: " << memory_time << " s\n";
         std::cout << "Block: " << i << " Scan: " << scan_time << " s\n";
-        std::cout << "Block: " << i << " Merge: " << merge_time << " s\n\n";
+        std::cout << "Block: " << i << " Merge: " << merge_time << " s\n";
+        std::cout << "Block: " << i << " Longest Scan: " << longest_scan << "\n";
+        std::cout << "Block: " << i << " Longest Scan transaction size: " << d_time_stuff[i].largest_trans_scan << "\n";
+        std::cout << "Block: " << i << " Longest Merge: " <<  longest_merge << "\n";
+        std::cout << "Block: " << i << " Longest Merge transaction size: " << d_time_stuff[i].largest_trans_merge << "\n";
+
+
+        std::cout << "\n";
     
         // Accumulate totals for averages.
         total_idle_time   += idle_time;
@@ -398,30 +413,33 @@ int main(int argc, char *argv[])
         if (memory_time < min_memory_time) min_memory_time = memory_time;
         if (scan_time < min_scan_time)     min_scan_time   = scan_time;
         if (merge_time < min_merge_time)   min_merge_time  = merge_time;
+        if (d_time_stuff[i].processed_count < min_processed_count) min_processed_count = d_time_stuff[i].processed_count;
     
         // Update maximum values.
         if (idle_time > max_idle_time)   max_idle_time   = idle_time;
         if (memory_time > max_memory_time) max_memory_time = memory_time;
         if (scan_time > max_scan_time)     max_scan_time   = scan_time;
         if (merge_time > max_merge_time)   max_merge_time  = merge_time;
+        if (d_time_stuff[i].processed_count > max_processed_count) max_processed_count = d_time_stuff[i].processed_count;
     }
     
     // Compute averages.
-    float avg_idle_time   = total_idle_time / blocks;
-    float avg_memory_time = total_memory_time / blocks;
-    float avg_scan_time   = total_scan_time / blocks;
-    float avg_merge_time  = total_merge_time / blocks;
+    float avg_idle_time   = total_idle_time /args.blocks;
+    float avg_memory_time = total_memory_time /args.blocks;
+    float avg_scan_time   = total_scan_time /args.blocks;
+    float avg_merge_time  = total_merge_time /args.blocks;
     
     // Print summary statistics.
     std::cout << "Idle Time - Avg: "   << avg_idle_time   << " s, Min: " << min_idle_time   << " s, Max: " << max_idle_time   << " s\n";
     std::cout << "Memory Time - Avg: " << avg_memory_time << " s, Min: " << min_memory_time << " s, Max: " << max_memory_time << " s\n";
     std::cout << "Scan Time - Avg: "   << avg_scan_time   << " s, Min: " << min_scan_time   << " s, Max: " << max_scan_time   << " s\n";
     std::cout << "Merge Time - Avg: "  << avg_merge_time  << " s, Min: " << min_merge_time  << " s, Max: " << max_merge_time  << " s\n";
+    std::cout << "Processed Count - Min: " << min_processed_count << ", Max: " << max_processed_count << "\n";
     
 
     
-    std::cout << "Blocks: " << blocks << "\n";
-    std::cout << "Threads per block: " << threads << "\n";
+    std::cout << "Blocks: " <<args.blocks << "\n";
+    std::cout << "Threads per block: " << args.threads << "\n";
 
     std::cout << "High Utility Patterns: " << Patterns.size() << "\n";
 
