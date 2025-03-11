@@ -1,8 +1,5 @@
-// args.h
 
-#ifndef args_H
-#define args_H
-
+#pragma once
 #include <string>
 #include <vector>
 #include <iostream>
@@ -14,8 +11,6 @@ struct ParsedArgs {
     std::string filename;
     int utility;
     std::string separator;
-    int blocks;
-    int threads;
 };
 
 // Function to parse command-line arguments
@@ -68,5 +63,3 @@ private:
     std::vector<TimeRecord> records;
 };
 
-
-#endif // args_H

@@ -16,7 +16,7 @@ __device__ uint32_t hashFunction(uint32_t key, uint32_t tableSize)
 struct Item
 {
     int key;
-    int util;
+    int value;
 };
 
 struct Utils
@@ -56,7 +56,7 @@ __device__ int find_item(const Utils *lu_su, int n, int key)
 struct Transaction
 {
     // Pointer to the first Item of this transaction’s subarray.
-    Item* data;
+    Item *data;
     // Number of items in this transaction.
     int length;
     int utility;
@@ -65,27 +65,42 @@ struct Transaction
 
     // Allow treating the transaction like an array.
     __device__ __host__ Item &operator[](int i) { return data[i]; }
-    
+
     __device__ __host__ Item *operator->() { return data; }
-    
+
     __device__ __host__ Item *get() { return data; }
 
-    // Binary search for a given key in this transaction.
-    __device__ int findItem(uint32_t search_id) const
+    __device__ __forceinline__ int findItem(uint32_t search_id) const
     {
+        if (length == 0)
+            return -1; // Early exit if no elements
+
         int l = 0, r = length - 1;
+        uint32_t firstKey = data[l].key;
+        uint32_t lastKey = data[r].key;
+
+        // Early boundary checks
+        if (firstKey > search_id || lastKey < search_id)
+            return -1;
+        if (firstKey == search_id)
+            return l;
+        if (lastKey == search_id)
+            return r;
+
         while (l <= r)
         {
-            int mid = l + (r - l) / 2;
-            if (data[mid].key == search_id)
+            int mid = (l + r) >> 1;          // Bit-shift division
+            uint32_t midKey = data[mid].key; // Load once into register
+            if (midKey == search_id)
                 return mid;
-            data[mid].key < search_id ? l = mid + 1 : r = mid - 1;
+            else if (midKey < search_id)
+                l = mid + 1;
+            else
+                r = mid - 1;
         }
         return -1;
     }
 };
-
-
 
 struct Database
 {
@@ -94,6 +109,17 @@ struct Database
     int numTransactions;
     int transaction_tracker;
     int numItems;
+
+    // = operator
+    __device__ Database &operator=(const Database &other)
+    {
+        d_data = other.d_data;
+        d_transactions = other.d_transactions;
+        numTransactions = other.numTransactions;
+        transaction_tracker = other.transaction_tracker;
+        numItems = other.numItems;
+        return *this;
+    }
 
     __device__ bool sameKey(int t1, int t2)
     {
@@ -114,19 +140,20 @@ struct Database
 
 __device__ __host__ void printDatabase(const Database *db)
 {
-    if (!db) {
+    if (!db)
+    {
         printf("Database pointer is NULL!\n");
         return;
     }
-    
+
     for (int t = 0; t < db->numTransactions; t++)
     {
         const Transaction &tran = db->d_transactions[t];
-        
+
         printf("%d|", tran.utility);
         for (int i = 0; i < tran.length; i++)
         {
-            printf("%d:%d ", tran.data[i].key, tran.data[i].util);
+            printf("%d:%d ", tran.data[i].key, tran.data[i].value);
         }
         printf("\n");
     }
