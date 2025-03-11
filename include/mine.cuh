@@ -376,145 +376,145 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         }
         __syncthreads();
 
-        // (5) Copy the transactions
-        while (transactions_processed != num_transactions)
-        {
-            __syncthreads();
-            // load into buffer
-            if (tid + transactions_processed < num_transactions)
-            {
-                buffer_transactions[tid] = temp_transactions[tid + transactions_processed];
-                atomicMax(&last_transaction, tid);
-            }
-            __syncthreads();
+        // // (5) Copy the transactions
+        // while (transactions_processed != num_transactions)
+        // {
+        //     __syncthreads();
+        //     // load into buffer
+        //     if (tid + transactions_processed < num_transactions)
+        //     {
+        //         buffer_transactions[tid] = temp_transactions[tid + transactions_processed];
+        //         atomicMax(&last_transaction, tid);
+        //     }
+        //     __syncthreads();
 
-            // load the item indices into buffer
-            if (tid <= last_transaction)
-            {
-                indices[tid + 1] = buffer_transactions[tid].length;
-            }
-            __syncthreads();
+        //     // load the item indices into buffer
+        //     if (tid <= last_transaction)
+        //     {
+        //         indices[tid + 1] = buffer_transactions[tid].length;
+        //     }
+        //     __syncthreads();
 
-            // cumulative sum
-            if (tid == 0)
-            {
-                indices[0] = 0;
-                // printf("%d ", indices[0]);
-                for (int i = 1; i <= last_transaction; i++)
-                {
-                    // printf("%d ", indices[i]);
-                    indices[i] += indices[i - 1];
-                    // if greater than threads, break
-                    if (indices[i] > threads)
-                    {
-                        last_transaction = i - 1;
-                        break;
-                    }
-                }
-                // printf("\n");
+        //     // cumulative sum
+        //     if (tid == 0)
+        //     {
+        //         indices[0] = 0;
+        //         // printf("%d ", indices[0]);
+        //         for (int i = 1; i <= last_transaction; i++)
+        //         {
+        //             // printf("%d ", indices[i]);
+        //             indices[i] += indices[i - 1];
+        //             // if greater than threads, break
+        //             if (indices[i] > threads)
+        //             {
+        //                 last_transaction = i - 1;
+        //                 break;
+        //             }
+        //         }
+        //         // printf("\n");
 
-                // // print the cumulative sum
-                // for (int i = 0; i <= last_transaction; i++)
-                // {
-                //     printf("%d:%d ", i,indices[i]);
-                // }
-                // printf("\n");
+        //         // // print the cumulative sum
+        //         // for (int i = 0; i <= last_transaction; i++)
+        //         // {
+        //         //     printf("%d:%d ", i,indices[i]);
+        //         // }
+        //         // printf("\n");
 
-                transactions_processed += last_transaction + 1;
-            }
-            __syncthreads();
+        //         transactions_processed += last_transaction + 1;
+        //     }
+        //     __syncthreads();
 
-            // get which transaction and which item to load into buffer
-            int transaction_id = -1;
-            int item_id = -1;
-            for (int i = 0; i < last_transaction + 1; i++)
-            {
-                if (tid >= indices[i] && tid < indices[i + 1] && indices[i + 1] < threads)
-                {
-                    transaction_id = i;
-                    item_id = tid - indices[i];
-                    break;
-                }
-            }
+        //     // get which transaction and which item to load into buffer
+        //     int transaction_id = -1;
+        //     int item_id = -1;
+        //     for (int i = 0; i < last_transaction + 1; i++)
+        //     {
+        //         if (tid >= indices[i] && tid < indices[i + 1] && indices[i + 1] < threads)
+        //         {
+        //             transaction_id = i;
+        //             item_id = tid - indices[i];
+        //             break;
+        //         }
+        //     }
 
 
-            __syncthreads();
-            // printf("TID:%d\tTransaction ID: %d, Item ID: %d\n", tid,transaction_id, item_id);
-            __syncthreads();
+        //     __syncthreads();
+        //     // printf("TID:%d\tTransaction ID: %d, Item ID: %d\n", tid,transaction_id, item_id);
+        //     __syncthreads();
 
-            // __syncthreads();
-            valid[tid + 1] = false;
-            // if(tid == 0)
-            // {
-            //     printf("Last Transaction: %d\n\n", last_transaction);
-            // }
-            // __syncthreads();
+        //     // __syncthreads();
+        //     valid[tid + 1] = false;
+        //     // if(tid == 0)
+        //     // {
+        //     //     printf("Last Transaction: %d\n\n", last_transaction);
+        //     // }
+        //     // __syncthreads();
 
-            // load the items into buffer
-            if (transaction_id != -1 && item_id != -1)
-            {
-                buffer_items[tid] = temp_transactions[transaction_id].data[item_id];
-                atomicMax(&last_item, tid);
-                // if the item had a local utility greater than min_util, set valid to true
-                int idx = find_item(lu_su, work_item.max_item * scale, buffer_items[tid].key);
-                if (idx != -1 && lu_su[idx].local_util >= min_util)
-                {
-                    valid[tid] = true;
-                }
-            }
-            __syncthreads();
+        //     // load the items into buffer
+        //     if (transaction_id != -1 && item_id != -1)
+        //     {
+        //         buffer_items[tid] = temp_transactions[transaction_id].data[item_id];
+        //         atomicMax(&last_item, tid);
+        //         // if the item had a local utility greater than min_util, set valid to true
+        //         int idx = find_item(lu_su, work_item.max_item * scale, buffer_items[tid].key);
+        //         if (idx != -1 && lu_su[idx].local_util >= min_util)
+        //         {
+        //             valid[tid] = true;
+        //         }
+        //     }
+        //     __syncthreads();
 
-            // if (tid == 0)
-            // {
-            //     printf("Last Transaction: %d\n", last_transaction);
-            //     printf("Last Item: %d\n", last_item);
-            //     for (int i = 0; i < last_item; i++)
-            //     {
-            //         printf("%d:%d ", buffer_items[i].key, buffer_items[i].value);
-            //     }
-            //     printf("\n");
+        //     // if (tid == 0)
+        //     // {
+        //     //     printf("Last Transaction: %d\n", last_transaction);
+        //     //     printf("Last Item: %d\n", last_item);
+        //     //     for (int i = 0; i < last_item; i++)
+        //     //     {
+        //     //         printf("%d:%d ", buffer_items[i].key, buffer_items[i].value);
+        //     //     }
+        //     //     printf("\n");
 
-            //     for (int i = 0; i < last_item; i++)
-            //     {
-            //         printf("%d ", valid[i]);
-            //     }
-            //     printf("\n");
-            // }
-            // __syncthreads();
+        //     //     for (int i = 0; i < last_item; i++)
+        //     //     {
+        //     //         printf("%d ", valid[i]);
+        //     //     }
+        //     //     printf("\n");
+        //     // }
+        //     // __syncthreads();
 
-            // cumulative sum of the valid items
-            if (tid == 0)
-            {
-                valid[0] = 0;
-                for (int i = 1; i <= last_item; i++)
-                {
-                    valid[i] += valid[i - 1];
-                }
-            }
+        //     // cumulative sum of the valid items
+        //     if (tid == 0)
+        //     {
+        //         valid[0] = 0;
+        //         for (int i = 1; i <= last_item; i++)
+        //         {
+        //             valid[i] += valid[i - 1];
+        //         }
+        //     }
 
             
 
-            // // print the cumulative sum
-            // if (tid == 0)
-            // {
-            //     for (int i = 0; i < last_item; i++)
-            //     {
-            //         printf("%d ", valid[i]);
-            //     }
-            //     printf("\n");
-            // }
+        //     // // print the cumulative sum
+        //     // if (tid == 0)
+        //     // {
+        //     //     for (int i = 0; i < last_item; i++)
+        //     //     {
+        //     //         printf("%d ", valid[i]);
+        //     //     }
+        //     //     printf("\n");
+        //     // }
 
-            if (tid == 0)
-            {
-                last_transaction = -1;
-                last_item = -1;
-                // printf("\n\n");
-            }
+        //     if (tid == 0)
+        //     {
+        //         last_transaction = -1;
+        //         last_item = -1;
+        //         // printf("\n\n");
+        //     }
 
-            __syncthreads();
+        //     __syncthreads();
 
 
-        }
+        // }
         // __syncthreads();
 
         // (6) Merge identical transactions
