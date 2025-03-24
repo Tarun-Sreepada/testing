@@ -3,14 +3,6 @@
 
 CMakeFiles/cuEFIM.dir/main.cu.o
  /export/home1/ltarun/testing/main.cu
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/alloc_utils.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/block.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/gallatin.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/global_allocator.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/memory_table.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/murmurhash.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/shared_block_storage.cuh
- /export/home1/ltarun/testing/build/_deps/gallatin-src/include/gallatin/allocators/veb.cuh
  /export/home1/ltarun/testing/include/args.h
  /export/home1/ltarun/testing/include/database.cuh
  /export/home1/ltarun/testing/include/memory.cuh
@@ -18,12 +10,8 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /export/home1/ltarun/testing/include/parser.h
  /export/home1/ltarun/testing/include/work.cuh
  /usr/include/alloca.h
- /usr/include/asm-generic/bitsperlong.h
  /usr/include/asm-generic/errno-base.h
  /usr/include/asm-generic/errno.h
- /usr/include/asm-generic/int-ll64.h
- /usr/include/asm-generic/posix_types.h
- /usr/include/asm-generic/types.h
  /usr/include/assert.h
  /usr/include/c++/12/array
  /usr/include/c++/12/atomic
@@ -224,11 +212,7 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/include/linux/close_range.h
  /usr/include/linux/errno.h
  /usr/include/linux/falloc.h
- /usr/include/linux/futex.h
  /usr/include/linux/limits.h
- /usr/include/linux/posix_types.h
- /usr/include/linux/stddef.h
- /usr/include/linux/types.h
  /usr/include/locale.h
  /usr/include/math.h
  /usr/include/pthread.h
@@ -245,11 +229,7 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/include/unistd.h
  /usr/include/wchar.h
  /usr/include/wctype.h
- /usr/include/x86_64-linux-gnu/asm/bitsperlong.h
  /usr/include/x86_64-linux-gnu/asm/errno.h
- /usr/include/x86_64-linux-gnu/asm/posix_types.h
- /usr/include/x86_64-linux-gnu/asm/posix_types_64.h
- /usr/include/x86_64-linux-gnu/asm/types.h
  /usr/include/x86_64-linux-gnu/asm/unistd.h
  /usr/include/x86_64-linux-gnu/asm/unistd_64.h
  /usr/include/x86_64-linux-gnu/bits/atomic_wide_counter.h
@@ -379,22 +359,6 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/lib/gcc/x86_64-linux-gnu/12/include/syslimits.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/builtin_types.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/channel_descriptor.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/coalesced_reduce.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/coalesced_scan.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/driver_abi.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/functional.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/helpers.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/info.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/invoke.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/memory.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/partitioning.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/reduce.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/scan.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/details/sync.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/reduce.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cooperative_groups/scan.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/crt/common_functions.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/crt/cudacc_ext.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/crt/device_double_functions.h
@@ -553,9 +517,7 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cub/warp/warp_reduce.cuh
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cub/warp/warp_scan.cuh
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cub/warp/warp_store.cuh
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/__cccl_config
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/atomic
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/discard_memory
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/functional
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__algorithm/comp.h
@@ -575,24 +537,6 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__algorithm/swap_ranges.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__algorithm/transform.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__algorithm/unwrap_iter.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/api/common.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/api/owned.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/api/reference.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/functions.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/functions/cuda_ptx_derived.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/functions/cuda_ptx_generated.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/functions/host.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/order.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/platform.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/scopes.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/types.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/types/base.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/types/common.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/types/locked.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/types/reference.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/types/small.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/wait/notify_wait.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__atomic/wait/polling.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cccl/attributes.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cccl/compiler.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cccl/diagnostic.h
@@ -629,8 +573,6 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__concepts/semiregular.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__concepts/swappable.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__concepts/totally_ordered.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cuda/atomic.h
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cuda/chrono.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cuda/climits_prelude.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cuda/cstddef_prelude.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__cuda/cstdint_prelude.h
@@ -883,33 +825,25 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__utility/to_underlying.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/__utility/unreachable.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/array
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/atomic
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/cassert
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/chrono
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/climits
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/concepts
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/cstddef
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/cstdint
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/cstdlib
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/ctime
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/__config
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__assert
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__availability
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__config
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__debug
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__functional_base
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__threading_support
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/__verbose_abort
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/array
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/cassert
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/chrono
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/climits
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/concepts
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/cstddef
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/cstdint
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/cstdlib
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/cstring
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/ctime
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/functional
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/initializer_list
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/iosfwd
@@ -917,7 +851,6 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/limits
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/new
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/optional
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/ratio
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/stdexcept
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/string.h
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/detail/libcxx/include/tuple
@@ -929,7 +862,6 @@ CMakeFiles/cuEFIM.dir/main.cu.o
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/iterator
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/limits
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/optional
- /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/ratio
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/tuple
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/type_traits
  /usr/local/cuda-12.6/targets/x86_64-linux/include/cuda/std/utility

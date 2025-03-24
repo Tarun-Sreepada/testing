@@ -42,6 +42,8 @@ def format_summary_lines_3_columns(lines, ncols=3):
         rows += temp
     return rows
 
+
+
 def main(filename):
     # Read the file.
     with open(filename, 'r') as f:
@@ -91,6 +93,14 @@ def main(filename):
     scan_list = []
     merge_list = []
     processed_list = []
+    # New metrics lists.
+    longest_scan_list = []
+    longest_scan_tx_size_list = []
+    longest_merge_list = []
+    longest_merge_txn_count_list = []
+    longest_merge_tx_size_list = []
+    longest_merge_merge_count_list = []
+    
 
     for i in range(total_blocks):
         data = blocks.get(i, {})
@@ -100,6 +110,13 @@ def main(filename):
         scan_list.append(data.get("Scan", np.nan))
         merge_list.append(data.get("Merge", np.nan))
         processed_list.append(data.get("Processed", np.nan))
+        # Append new metrics.
+        longest_scan_list.append(data.get("Longest Scan", np.nan))
+        longest_scan_tx_size_list.append(data.get("Longest Scan transaction size", np.nan))
+        longest_merge_list.append(data.get("Longest Merge", np.nan))
+        longest_merge_txn_count_list.append(data.get("Longest Merge transaction count", np.nan))
+        longest_merge_tx_size_list.append(data.get("Longest Merge transaction size", np.nan))
+        longest_merge_merge_count_list.append(data.get("Longest Merge merge count", np.nan))
 
     # Convert each list into a numpy array and reshape into (rows x cols).
     time_mat  = np.array(time_list).reshape(rows, cols)
@@ -108,15 +125,29 @@ def main(filename):
     scan_mat  = np.array(scan_list).reshape(rows, cols)
     merge_mat = np.array(merge_list).reshape(rows, cols)
     processed_mat = np.array(processed_list).reshape(rows, cols)
+    # New matrices.
+    longest_scan_mat = np.array(longest_scan_list).reshape(rows, cols)
+    longest_scan_tx_size_mat = np.array(longest_scan_tx_size_list).reshape(rows, cols)
+    longest_merge_mat = np.array(longest_merge_list).reshape(rows, cols)
+    longest_merge_txn_count_mat = np.array(longest_merge_txn_count_list).reshape(rows, cols)
+    longest_merge_tx_size_mat = np.array(longest_merge_tx_size_list).reshape(rows, cols)
+    # Block: 40 Longest Merge merge count: 0
+    longest_merge_merge_count_mat = np.array(longest_merge_merge_count_list).reshape(rows, cols)
 
-    # Prepare a list of (matrix, title) tuples for plotting, now including "Processed".
+    # Prepare a list of (matrix, title) tuples for plotting, including the new metrics.
     plots = [
         (time_mat, "Time (s)"),
         (idle_mat, "Idle (s)"),
         (mem_mat, "Memory Alloc (s)"),
         (scan_mat, "Scan (s)"),
         (merge_mat, "Merge (s)"),
-        (processed_mat, "Processed")
+        (processed_mat, "Processed"),
+        (longest_scan_mat, "Longest Scan (s)"),
+        (longest_scan_tx_size_mat, "Longest Scan txn size"),
+        (longest_merge_mat, "Longest Merge (s)"),
+        (longest_merge_txn_count_mat, "Longest Merge txn count"),
+        (longest_merge_tx_size_mat, "Longest Merge txn size"),
+        (longest_merge_merge_count_mat, "Longest Merge merge count")
     ]
 
     # Determine subplot grid size for the plots.
@@ -132,7 +163,6 @@ def main(filename):
     for i, (mat, title) in enumerate(plots):
         im = axs[i].imshow(mat, cmap='viridis', vmin=0)
         axs[i].set_title(title)
-        # boundaries = 0 to max
         fig.colorbar(im, ax=axs[i])
 
     # Hide any unused subplots.
@@ -144,13 +174,14 @@ def main(filename):
 
     # Adjust layout to leave extra space at the bottom and add the summary text.
     plt.tight_layout(rect=[0, 0.25, 1, 1])
-    plt.figtext(0.5, 0.02, summary_text, wrap=True,
-                horizontalalignment='center', verticalalignment='bottom',
-                fontsize=10, bbox=dict(facecolor='white', alpha=0.5, edgecolor='black'))
+    # plt.figtext(0.5, 0.02, summary_text, wrap=True,
+    #             horizontalalignment='center', verticalalignment='bottom',
+    #             fontsize=10, bbox=dict(facecolor='white', alpha=0.5, edgecolor='black'))
 
-    # plt.show()
+    # Save the figure.
     output_filename = filename.rsplit('.', 1)[0] + "_output.png"
     plt.savefig(output_filename)
+
 
 def old(filename):
     # Read the file.
@@ -267,4 +298,4 @@ if __name__ == '__main__':
         print("Usage: python script.py <filename>")
     else:
         main(sys.argv[1])
-        old(sys.argv[1])
+        # old(sys.argv[1])

@@ -20,7 +20,10 @@
 #define GIGA KILO *MEGA
 
 // #define page_size (128 * KILO)
-#define total_memory (4 * GIGA)
+#define total_memory (32 * GIGA)
+
+#include <limits>
+#include <iostream>
 
 // make && ./cuEFIM '/home/tarun/testing/test.txt' 5 \\s
 // make && time ./cuEFIM '/home/tarun/cuEFIM/datasets/accidents_utility_spmf.txt' 15000000 \\s
@@ -243,7 +246,7 @@ int main(int argc, char *argv[])
 
     int shared_mem_req = max_item * sizeof(Utils) * scale // for local_util
                         + max_size * sizeof(Item) // for temp_transaction
-                         + 2 * KILO; // for other variables
+                         + 3 * KILO; // for other variables
 
     std::cout << "Shared Memory Required: " << shared_mem_req << " Bytes\n";
 
@@ -315,10 +318,14 @@ int main(int argc, char *argv[])
 
     cudaMemAdvise(d_time_stuff, sizeof(time_stuff) * args.blocks, cudaMemAdviseSetPreferredLocation, 0); // set preferred location to GPU
 
-    while (curr_work_queue->active > 0)
-    {
+    core_flame_graph *core_graphs;
+    cudaMallocManaged(&core_graphs, sizeof(core_flame_graph) * args.blocks);
+    memset(core_graphs, 0, sizeof(core_flame_graph) * args.blocks);
+
+    // while (curr_work_queue->active > 0)
+    // {
         printf("Top: %d\n", curr_work_queue->active);
-        test<<<args.blocks, args.threads, shared_mem_req>>>(curr_work_queue, d_high_utility_patterns, args.utility, d_time_stuff);
+        test<<<args.blocks, args.threads, shared_mem_req>>>(curr_work_queue, d_high_utility_patterns, args.utility, d_time_stuff, core_graphs);
         // print last error
         cudaStatus = cudaGetLastError();
         if (cudaStatus != cudaSuccess)
@@ -328,7 +335,7 @@ int main(int argc, char *argv[])
         }
 
         cudaDeviceSynchronize();
-    }
+    // }
 
     timer.recordPoint("Kernel Execution");
     std::map<std::string, int> Patterns = parse_patterns(d_high_utility_patterns, rename);
@@ -350,8 +357,7 @@ int main(int argc, char *argv[])
 
     std::cout << "\n";
 
-    #include <limits>
-    #include <iostream>
+
     
     // Assume d_time_stuff is defined and populated, and clock_rate and blocks are defined.
     
@@ -371,6 +377,8 @@ int main(int argc, char *argv[])
     float max_merge_time = 0.0f;
     int min_processed_count = std::numeric_limits<int>::max();
     int max_processed_count = 0;
+    float min_push_time = std::numeric_limits<float>::max();
+    float max_push_time = 0.0f;
 
 
     for (int i = 0; i <args.blocks; i++)
@@ -386,6 +394,7 @@ int main(int argc, char *argv[])
         float merge_time  = d_time_stuff[i].merging       / (float)clock_rate;
         float longest_scan = d_time_stuff[i].tt_scan / (float)clock_rate;
         float longest_merge = d_time_stuff[i].tt_merging / (float)clock_rate;
+        float push_time = d_time_stuff[i].push / (float)clock_rate;
     
         // Print per-block times.
         std::cout << "Block: " << i << " Time: " << elapsed_time << " s\n";
@@ -396,11 +405,27 @@ int main(int argc, char *argv[])
         std::cout << "Block: " << i << " Merge: " << merge_time << " s\n";
         std::cout << "Block: " << i << " Longest Scan: " << longest_scan << "\n";
         std::cout << "Block: " << i << " Longest Scan transaction size: " << d_time_stuff[i].largest_trans_scan << "\n";
+        std::cout << "Block: " << i << " Longest Merge transaction count: " << d_time_stuff[i].largest_trans_count_scan << "\n";
         std::cout << "Block: " << i << " Longest Merge: " <<  longest_merge << "\n";
         std::cout << "Block: " << i << " Longest Merge transaction size: " << d_time_stuff[i].largest_trans_merge << "\n";
+        std::cout << "Block: " << i << " Longest Merge transaction count: " << d_time_stuff[i].largest_trans_count_merge << "\n";
+        std::cout << "Block: " << i << " Longest Merge merge count: " << d_time_stuff[i].merge_count << "\n";
+        std::cout << "Block: " << i << " Push: " << push_time << "\n";
 
+        std::cout << "===========================================================================\n";
+        std::cout << "Idle | Scan | Memory | Merge | Push\n";
+        for (int j = 0; j < d_time_stuff[i].processed_count + 1; j++)
+        {
+            float idle = core_graphs[i].buckets[j].idle / (float)clock_rate;
+            float scan = core_graphs[i].buckets[j].scanning / (float)clock_rate;
+            float memory = core_graphs[i].buckets[j].memory_alloc / (float)clock_rate;
+            float merge = core_graphs[i].buckets[j].merging / (float)clock_rate;
+            float push = core_graphs[i].buckets[j].push / (float)clock_rate;
+            std::cout << idle << " | " << scan << " | " << memory << " | " << merge << " | " << push << "\n";
 
-        std::cout << "\n";
+            // std::cout << core_graphs[i].buckets[j].idle << " | " << core_graphs[i].buckets[j].scanning << " | " << core_graphs[i].buckets[j].memory_alloc << " | " << core_graphs[i].buckets[j].merging << " | " << core_graphs[i].buckets[j].push << "\n";
+        }
+        std::cout << "===========================================================================\n\n";
     
         // Accumulate totals for averages.
         total_idle_time   += idle_time;
@@ -414,6 +439,7 @@ int main(int argc, char *argv[])
         if (scan_time < min_scan_time)     min_scan_time   = scan_time;
         if (merge_time < min_merge_time)   min_merge_time  = merge_time;
         if (d_time_stuff[i].processed_count < min_processed_count) min_processed_count = d_time_stuff[i].processed_count;
+        if (push_time < min_push_time) min_push_time = push_time;
     
         // Update maximum values.
         if (idle_time > max_idle_time)   max_idle_time   = idle_time;
@@ -421,6 +447,7 @@ int main(int argc, char *argv[])
         if (scan_time > max_scan_time)     max_scan_time   = scan_time;
         if (merge_time > max_merge_time)   max_merge_time  = merge_time;
         if (d_time_stuff[i].processed_count > max_processed_count) max_processed_count = d_time_stuff[i].processed_count;
+        if (push_time > max_push_time) max_push_time = push_time;
     }
     
     // Compute averages.
@@ -434,6 +461,7 @@ int main(int argc, char *argv[])
     std::cout << "Memory Time - Avg: " << avg_memory_time << " s, Min: " << min_memory_time << " s, Max: " << max_memory_time << " s\n";
     std::cout << "Scan Time - Avg: "   << avg_scan_time   << " s, Min: " << min_scan_time   << " s, Max: " << max_scan_time   << " s\n";
     std::cout << "Merge Time - Avg: "  << avg_merge_time  << " s, Min: " << min_merge_time  << " s, Max: " << max_merge_time  << " s\n";
+    std::cout << "Push Time - Min: " << min_push_time << ", Max: " << max_push_time << "\n";
     std::cout << "Processed Count - Min: " << min_processed_count << ", Max: " << max_processed_count << "\n";
     
 

@@ -16,19 +16,39 @@
 #define LOCAL_UTIL true
 #define SUBTREE_UTIL false
 
+#define bucket_per_core 8192
+
 struct time_stuff
 {
-    uint64_t start,
-        end,
-        idle,
-        scanning,
-        memory_alloc,
-        merging,
-        push, prev, 
-        processed_count, 
-        largest_trans_scan, largest_trans_merge, 
-        tt_scan, tt_merging;
+    uint64_t
+        start,                                               // start time
+        end,                                                 // end time
+        idle,                                                // idle time
+        scanning,                                            // scanning time
+        memory_alloc,                                        // memory allocation time
+        merging,                                             // write and merging time
+        push,                                                // push time
+        prev,                                                // previous time
+        processed_count,                                     // number of work items processed
+        largest_trans_scan, largest_trans_merge,             // largest transaction length
+        largest_trans_count_scan, largest_trans_count_merge, // number of transactions
+        merge_count,                                         // number of merged transactions
+        tt_scan, tt_merging;                                 // total time for scanning and merging
 };
+
+struct flame_graph_bucket {
+    uint64_t idle;           // Sum of idle time for these iterations
+    uint64_t scanning;       // Sum of scanning time for these iterations
+    uint64_t memory_alloc;   // Sum of memory allocation time for these iterations
+    uint64_t merging;        // Sum of merging time for these iterations
+    uint64_t push;           // Sum of push time for these iterations
+};
+
+struct core_flame_graph {
+    struct flame_graph_bucket buckets[bucket_per_core];
+};
+
+
 
 __device__ void printBucketUtil(Utils *lu_su, int max_item)
 {
@@ -97,7 +117,8 @@ __device__ __noinline__ void add_pattern(WorkItem *wi, int *high_utility_pattern
 
 __global__ void test(AtomicWorkStack *curr_work_queue,
                      int32_t *d_high_utility_patterns,
-                     int min_util, time_stuff *d_time_stuff)
+                     int min_util, time_stuff *d_time_stuff,
+                     core_flame_graph *flame_graph)
 {
     const int bid = blockIdx.x;
     const int tid = threadIdx.x;
@@ -121,8 +142,15 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
     __shared__ int largest_trans_scan;
     __shared__ int largest_trans_merge;
 
+    __shared__ int merge_count;
 
     __shared__ time_stuff local_ts;
+
+    extern __shared__ char shared_memory[];
+
+    lu_su = reinterpret_cast<Utils *>(shared_memory);
+
+
     if (tid == 0)
     {
         memset(&local_ts, 0, sizeof(time_stuff));
@@ -130,9 +158,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         local_ts.prev = local_ts.start;
     }
     __syncthreads();
-
-    extern __shared__ char shared_memory[];
-
 
 
     // The outer loop: each iteration pops a new work-item from the global queue.
@@ -150,8 +175,15 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         {
             if (tid == 0)
             {
-                local_ts.idle += clock64() - local_ts.prev;
-                local_ts.prev = clock64();
+                uint64_t curr_time = clock64();
+                uint64_t diff = curr_time - local_ts.prev;
+
+                local_ts.idle += diff;
+                local_ts.prev = curr_time;
+
+                // local_ts.idle += curr_time - local_ts.prev;
+                // local_ts.prev = curr_time;
+                flame_graph[bid].buckets[local_ts.processed_count].idle += diff;
             }
             __syncthreads(); // all threads must sync before next iteration
             continue;
@@ -160,31 +192,61 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (2) Thread 0 initializes the new work item.
         if (tid == 0)
         {
-            local_ts.processed_count++;
             memset(&new_work_item, 0, sizeof(WorkItem));
 
             // Allocate and copy the pattern
             new_work_item.pattern = reinterpret_cast<int *>(global_malloc((work_item.pattern_length + 1) * sizeof(int)));
-            memcpy(new_work_item.pattern, work_item.pattern, work_item.pattern_length * sizeof(int));
+            // memcpy(new_work_item.pattern, work_item.pattern, work_item.pattern_length * sizeof(int));
             new_work_item.pattern[work_item.pattern_length] = work_item.primary;
             new_work_item.pattern_length = work_item.pattern_length + 1;
 
             num_items = 0;
             num_transactions = 0;
 
-            lu_su = reinterpret_cast<Utils *>(shared_memory);
-            memset(lu_su, 0, work_item.max_item * scale * sizeof(Utils));
+            // memset(lu_su, 0, work_item.max_item * scale * sizeof(Utils));
 
             temp_transaction = reinterpret_cast<Transaction *>(
                 global_malloc(work_item.db->numTransactions * sizeof(Transaction)));
-            memset(temp_transaction, 0, work_item.db->numTransactions * sizeof(Transaction));
-
-            local_ts.memory_alloc += clock64() - local_ts.prev;
-            local_ts.prev = clock64();
+            // memset(temp_transaction, 0, work_item.db->numTransactions * sizeof(Transaction));
 
             largest_trans_scan = 0;
             largest_trans_merge = 0;
+        }
+        __syncthreads();
 
+        for (int i = tid; i < work_item.pattern_length; i += blockDim.x)
+        {
+            new_work_item.pattern[i] = work_item.pattern[i];
+        }
+
+        __syncthreads();
+
+        for (int i = tid; i < work_item.max_item * scale; i += blockDim.x)
+        {
+            lu_su[i].key = 0;
+            lu_su[i].local_util = 0;
+            lu_su[i].subtree_util = 0;
+        }
+
+        __syncthreads();
+
+        for (int i = tid; i < work_item.db->numTransactions; i += blockDim.x)
+        {
+            memset(&temp_transaction[i], 0, sizeof(Transaction));
+        }
+        __syncthreads();
+
+        if (tid == 0)
+        {
+            // local_ts.memory_alloc += clock64() - local_ts.prev;
+            // local_ts.prev = clock64();
+            uint64_t curr_time = clock64();
+            uint64_t diff = curr_time - local_ts.prev;
+
+            local_ts.memory_alloc += diff;
+            local_ts.prev = curr_time;
+
+            flame_graph[bid].buckets[local_ts.processed_count].memory_alloc += diff;
         }
         __syncthreads();
 
@@ -244,12 +306,14 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
             local_ts.scanning += diff;
 
+            flame_graph[bid].buckets[local_ts.processed_count].scanning += diff;
+
             if (local_ts.tt_scan < diff)
             {
                 local_ts.tt_scan = diff;
                 local_ts.largest_trans_scan = largest_trans_scan;
+                local_ts.largest_trans_count_scan = work_item.db->numTransactions;
             }
-
 
             local_ts.prev = curr_time;
             // local_ts.scanning += clock64() - local_ts.prev;
@@ -287,6 +351,9 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                     global_free(work_item.db->d_transactions);
                     global_free(work_item.db);
                 }
+
+                local_ts.processed_count++;
+
             }
             __syncthreads();
             continue;
@@ -307,11 +374,28 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             primary_count = 0;
             hashes = reinterpret_cast<int *>(
                 global_malloc(num_transactions * scale * sizeof(int)));
-            memset(hashes, -1, num_transactions * scale * sizeof(int));
+            // memset(hashes, -1, num_transactions * scale * sizeof(int));
 
-            local_ts.memory_alloc += clock64() - local_ts.prev;
-            local_ts.prev = clock64();
+            merge_count = 0;
+
+            uint64_t curr_time = clock64();
+            uint64_t diff = curr_time - local_ts.prev;
+
+            // local_ts.memory_alloc += clock64() - local_ts.prev;
+            // local_ts.prev = clock64();
+
+            local_ts.memory_alloc += diff;
+            local_ts.prev = curr_time;
+
+            flame_graph[bid].buckets[local_ts.processed_count].memory_alloc += diff;
         }
+        __syncthreads();
+
+        for (int i = tid; i < num_transactions * scale; i += blockDim.x)
+        {
+            hashes[i] = -1;
+        }
+
         __syncthreads();
 
         for (int i = tid; i < num_transactions; i += blockDim.x)
@@ -354,10 +438,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 if (lu_su[idx].local_util >= min_util)
                 {
                     newTrans.data[trans_idx++] = tempTrans.data[j];
-                    // add_bucket_util(subtree_util,
-                    //                 work_item.max_item * scale,
-                    //                 tempTrans.data[j].key,
-                    //                 total_subtree_util - temp_util);
                     add_bucket_util(lu_su, work_item.max_item * scale, tempTrans.data[j].key, total_subtree_util - temp_util, SUBTREE_UTIL);
                     temp_util += tempTrans.data[j].util;
                 }
@@ -377,6 +457,8 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 // If the transactions have the same key pattern, merge them.
                 if (new_work_item.db->sameKey(old, new_trans_idx))
                 {
+                    atomicAdd(&merge_count, 1);
+                    // printf("Merge count: %d\n", atomicAdd(&merge_count, 1));
                     Transaction &oldTran = new_work_item.db->d_transactions[old];
                     atomicAdd(&oldTran.utility, newTrans.utility);
                     for (int j = 0; j < oldTran.length; j++)
@@ -394,38 +476,46 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         }
         __syncthreads();
 
-        if (new_work_item.db->numTransactions == 0)
-        {
-            if (tid == 0)
-            {
-                // local_ts.merging += clock64() - local_ts.prev;
-                // local_ts.prev = clock64();
+        // if (new_work_item.db->numTransactions == 0)
+        // {
+        //     if (tid == 0)
+        //     {
+        //         // local_ts.merging += clock64() - local_ts.prev;
+        //         // local_ts.prev = clock64();
 
-                uint64_t curr_time = clock64();
-                uint64_t diff = curr_time - local_ts.prev;
+        //         uint64_t curr_time = clock64();
+        //         uint64_t diff = curr_time - local_ts.prev;
 
-                local_ts.merging += diff;
-                if (local_ts.tt_merging < diff)
-                {
-                    local_ts.tt_merging = diff;
-                    local_ts.largest_trans_merge = largest_trans_merge;
-                }
+        //         local_ts.merging += diff;
+        //         if (local_ts.tt_merging < diff)
+        //         {
+        //             local_ts.tt_merging = diff;
+        //             local_ts.largest_trans_merge = largest_trans_merge;
+        //             local_ts.largest_trans_count_merge = num_transactions;
+        //             local_ts.merge_count = merge_count;
+        //         }
 
-                curr_work_queue->finish_task();
+        //         curr_work_queue->finish_task();
 
-                // Free allocated memory here if necessary.
-                global_free(temp_transaction);
-                global_free(hashes);
-                global_free(new_work_item.db->d_data);
-                global_free(new_work_item.db->d_transactions);
-                global_free(new_work_item.db);
+        //         // Free allocated memory here if necessary.
+        //         global_free(temp_transaction);
+        //         global_free(hashes);
+        //         global_free(new_work_item.db->d_data);
+        //         global_free(new_work_item.db->d_transactions);
+        //         global_free(new_work_item.db);
 
-                // Free the pattern.
-                global_free(new_work_item.pattern);
-            }
-            __syncthreads();
-            continue;
-        }
+        //         // Free the pattern.
+        //         global_free(new_work_item.pattern);
+
+        //        local_ts.processed_count++;
+
+        //     }
+        //     __syncthreads();
+        //     continue;
+        // }
+
+        // __syncthreads();
+
 
         // (10) Update max_item and primary_count in parallel.
         for (int i = tid; i < work_item.max_item * scale; i += blockDim.x)
@@ -445,59 +535,65 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         __syncthreads();
 
         // push down empty transactions
-        if (tid < 32){
-            for(int i = tid; i < new_work_item.db->numTransactions; i += 32)
+        if (tid < 32)
+        {
+            for (int i = tid; i < new_work_item.db->numTransactions; i += 32)
             {
                 Transaction copy = new_work_item.db->d_transactions[i];
-                if(copy.data != nullptr)
+                if (copy.data != nullptr)
                 {
                     int ret = atomicAdd(&num_transactions, 1);
                     new_work_item.db->d_transactions[ret] = copy;
                 }
             }
         }
+
         __syncthreads();
 
         // sort transactions based on length : TODO
 
-        // (11) Compact the transactions array (this step is done serially by thread 0).
+
         if (tid == 0)
         {
-            // int compact_index = 0;
-            // for (int i = 0; i < new_work_item.db->numTransactions; i++)
-            // {
-            //     if (new_work_item.db->d_transactions[i].data != nullptr)
-            //     {
-            //         new_work_item.db->d_transactions[compact_index++] =
-            //             new_work_item.db->d_transactions[i];
-            //     }
-            // }
-            // new_work_item.db->numTransactions = compact_index;
             new_work_item.db->numTransactions = num_transactions;
-            // if (compact_index != num_transactions)
-            // {
-            //     printf("Error: compact_index: %d, num_transactions: %d\n", compact_index, num_transactions);
-            // }
 
-            local_ts.merging += clock64() - local_ts.prev;
-            local_ts.prev = clock64();
+            uint64_t curr_time = clock64();
+            uint64_t diff = curr_time - local_ts.prev;
+            local_ts.merging += diff;
+            local_ts.prev = curr_time;
+
+            flame_graph[bid].buckets[local_ts.processed_count].merging += diff;
+
+            if (local_ts.tt_merging < diff)
+            {
+                local_ts.tt_merging = diff;
+                local_ts.largest_trans_merge = largest_trans_merge;
+                local_ts.largest_trans_count_merge = num_transactions;
+            }
 
             new_work_item.max_item = max_item;
             new_work_item.work_count = primary_count;
             new_work_item.work_done = reinterpret_cast<int *>(
                 global_malloc(sizeof(int)));
             new_work_item.work_done[0] = 0;
+        }
 
-            // (12) For every surviving primary in subtree_util, push a new work-item.
-            for (int i = 0; i < work_item.max_item * scale; i++)
+        __syncthreads();
+
+        // (12) For every surviving primary in subtree_util, push a new work-item.
+        for (int i = tid; i < work_item.max_item * scale; i += blockDim.x)
+        {
+            if (lu_su[i].subtree_util >= min_util)
             {
-
-                if (lu_su[i].subtree_util >= min_util)
-                {
-                    new_work_item.primary = lu_su[i].key;
-                    curr_work_queue->push(new_work_item);
-                }
+                WorkItem copy = new_work_item;
+                copy.primary = lu_su[i].key;
+                curr_work_queue->push(copy);
             }
+        }
+        __syncthreads();
+
+        if (tid == 0)
+        {
             curr_work_queue->finish_task();
 
             // Free allocated memory here if necessary.
@@ -516,9 +612,21 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 global_free(work_item.db);
             }
 
-            local_ts.push += clock64() - local_ts.prev;
-            local_ts.prev = clock64();
+            // local_ts.push += clock64() - local_ts.prev;
+            // local_ts.prev = clock64();
+
+            uint64_t curr_time = clock64();
+            uint64_t diff = curr_time - local_ts.prev;
+
+            local_ts.push += diff;
+            local_ts.prev = curr_time;
+
+            flame_graph[bid].buckets[local_ts.processed_count].push += diff;
+
+            local_ts.processed_count++;
+
         }
+
         __syncthreads();
 
         // (Optional) Free allocated memory here if necessary.
@@ -526,8 +634,13 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
     if (tid == 0)
     {
-        local_ts.idle += clock64() - local_ts.prev;
-        local_ts.end = clock64();
+        uint64_t curr_time = clock64();
+        uint64_t diff = curr_time - local_ts.prev;
+
+        local_ts.idle += diff;
+        local_ts.prev = curr_time;
         d_time_stuff[bid] = local_ts;
+
+        flame_graph[bid].buckets[local_ts.processed_count].idle += diff;
     }
 }
