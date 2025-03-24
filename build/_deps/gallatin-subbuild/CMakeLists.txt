@@ -1,7 +1,7 @@
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
 # file Copyright.txt or https://cmake.org/licensing for details.
 
-cmake_minimum_required(VERSION 3.30.3)
+cmake_minimum_required(VERSION 3.28.3)
 
 # Reject any attempt to use a toolchain file. We must not use one because
 # we could be downloading it here. If the CMAKE_TOOLCHAIN_FILE environment
@@ -19,17 +19,17 @@ project(gallatin-populate NONE)
 # Pass through things we've already detected in the main project to avoid
 # paying the cost of redetecting them again in ExternalProject_Add()
 set(GIT_EXECUTABLE [==[/usr/bin/git]==])
-set(GIT_VERSION_STRING [==[2.34.1]==])
+set(GIT_VERSION_STRING [==[2.43.0]==])
 set_property(GLOBAL PROPERTY _CMAKE_FindGit_GIT_EXECUTABLE_VERSION
-  [==[/usr/bin/git;2.34.1]==]
+  [==[/usr/bin/git;2.43.0]==]
 )
 
 
 include(ExternalProject)
 ExternalProject_Add(gallatin-populate
                      "UPDATE_DISCONNECTED" "False" "GIT_REPOSITORY" "https://github.com/saltsystemslab/gallatin.git" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "GIT_TAG" "origin/main"
-                    SOURCE_DIR          "/export/home1/ltarun/testing/build/_deps/gallatin-src"
-                    BINARY_DIR          "/export/home1/ltarun/testing/build/_deps/gallatin-build"
+                    SOURCE_DIR          "/home/tarun/testing/build/_deps/gallatin-src"
+                    BINARY_DIR          "/home/tarun/testing/build/_deps/gallatin-build"
                     CONFIGURE_COMMAND   ""
                     BUILD_COMMAND       ""
                     INSTALL_COMMAND     ""

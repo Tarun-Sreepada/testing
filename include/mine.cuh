@@ -10,8 +10,8 @@
 
 #define scale 2
 
-// #define blocks 128
-// #define threads 512
+#define blocks 1
+#define threads 512
 
 #define LOCAL_UTIL true
 #define SUBTREE_UTIL false
@@ -20,6 +20,7 @@
 
 struct time_stuff
 {
+<<<<<<< HEAD
     uint64_t
         start,                                               // start time
         end,                                                 // end time
@@ -34,6 +35,18 @@ struct time_stuff
         largest_trans_count_scan, largest_trans_count_merge, // number of transactions
         merge_count,                                         // number of merged transactions
         tt_scan, tt_merging;                                 // total time for scanning and merging
+=======
+    uint64_t start,
+        end,
+        idle,
+        scanning,
+        memory_alloc,
+        merging,
+        push, prev,
+        processed_count,
+        largest_trans_scan, largest_trans_merge,
+        tt_scan, tt_merging;
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
 };
 
 struct flame_graph_bucket {
@@ -122,23 +135,22 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 {
     const int bid = blockIdx.x;
     const int tid = threadIdx.x;
+
     // Use shared memory only for values that one block will process together.
     __shared__ WorkItem work_item; // the work-item popped from the queue
-    __shared__ bool s_popped;      // did we successfully pop a work-item?
+    __shared__ Database work_item_db;
+    __shared__ bool popped; // did we successfully pop a work-item?
 
     // Shared copies for data that one block uses to process the work-item.
     __shared__ WorkItem new_work_item;
-    __shared__ Transaction *temp_transaction;
 
     __shared__ int num_items;
     __shared__ int num_transactions;
 
-    __shared__ int *hashes;
-    __shared__ int max_item;
-    __shared__ int primary_count;
-
     __shared__ Utils *lu_su;
+    __shared__ Transaction *temp_transactions;
 
+<<<<<<< HEAD
     __shared__ int largest_trans_scan;
     __shared__ int largest_trans_merge;
 
@@ -158,6 +170,16 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         local_ts.prev = local_ts.start;
     }
     __syncthreads();
+=======
+    __shared__ int transactions_processed;
+    __shared__ Transaction buffer_transactions[threads];
+    __shared__ int last_transaction;
+    __shared__ int last_item;
+
+    __shared__ int indices[threads + 1]; // for 0
+    __shared__ Item buffer_items[threads];
+    __shared__ int16_t valid[threads + 1];
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
 
 
     // The outer loop: each iteration pops a new work-item from the global queue.
@@ -166,13 +188,14 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         // (1) Only thread 0 pops from the work queue.
         if (tid == 0)
         {
-            s_popped = curr_work_queue->pop(&work_item);
+            popped = curr_work_queue->pop(&work_item);
         }
         __syncthreads();
 
-        // If no work-item was popped, then skip this iteration.
-        if (!s_popped)
+        // (1.1) If no work-item was popped, then skip this iteration.
+        if (!popped)
         {
+<<<<<<< HEAD
             if (tid == 0)
             {
                 uint64_t curr_time = clock64();
@@ -186,13 +209,21 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 flame_graph[bid].buckets[local_ts.processed_count].idle += diff;
             }
             __syncthreads(); // all threads must sync before next iteration
+=======
+            __syncthreads(); // all threads must sync before next iteration ? do we need this?
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
             continue;
         }
 
         // (2) Thread 0 initializes the new work item.
         if (tid == 0)
         {
+<<<<<<< HEAD
+=======
+            work_item_db = *work_item.db;
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
             memset(&new_work_item, 0, sizeof(WorkItem));
+            printf("Item: %d\n", work_item.primary);
 
             // Allocate and copy the pattern
             new_work_item.pattern = reinterpret_cast<int *>(global_malloc((work_item.pattern_length + 1) * sizeof(int)));
@@ -200,6 +231,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             new_work_item.pattern[work_item.pattern_length] = work_item.primary;
             new_work_item.pattern_length = work_item.pattern_length + 1;
 
+<<<<<<< HEAD
             num_items = 0;
             num_transactions = 0;
 
@@ -247,60 +279,178 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             local_ts.prev = curr_time;
 
             flame_graph[bid].buckets[local_ts.processed_count].memory_alloc += diff;
+=======
+            lu_su = reinterpret_cast<Utils *>(global_malloc(work_item.max_item * scale * sizeof(Utils)));
+            memset(lu_su, 0, work_item.max_item * scale * sizeof(Utils));
+
+            temp_transactions = reinterpret_cast<Transaction *>(
+                global_malloc(work_item_db.numTransactions * sizeof(Transaction)));
+            memset(temp_transactions, 0, work_item_db.numTransactions * sizeof(Transaction));
+
+            // transactions_processed = 0;
+
+            num_items = 0;
+            num_transactions = 0;
+            // last_transaction = -1;
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
         }
         __syncthreads();
 
-        // (4) Process each transaction in parallel.
-        for (int i = tid; i < work_item.db->numTransactions; i += blockDim.x)
+        // NOTE: THIS IS WAAAAAY TOO SLOW BUT IM LEAVING IT HERE FOR OTHERS TO SEE IF THEY CAN OPTIMIZE IT
+        // // (3) Process each transaction in parallel.
+        // while (transactions_processed != work_item.db->numTransactions)
+        // {
+        //     // Testing how long it would potentially take to scan
+        //     // if (tid == 0)
+        //     // {
+        //     //     // atomicAdd(&transactions_processed, last_transaction + 1);
+        //     //     atomicAdd(&transactions_processed, 16384);
+        //     // }
+        //     // __syncthreads();
+
+        //     // load into buffer
+        //     if (tid + transactions_processed < work_item_db.numTransactions)
+        //     {
+        //         // Copy the transaction to shared memory
+        //         buffer_transactions[tid] = work_item_db.d_transactions[tid + transactions_processed];
+        //         atomicMax(&last_transaction, tid);
+        //     }
+        //     __syncthreads();
+
+        //     // load the item indices into buffer
+        //     if (tid <= last_transaction)
+        //     {
+        //         indices[tid + 1] = buffer_transactions[tid].length;
+        //     }
+        //     __syncthreads();
+
+        //     // if (tid == 0)
+        //     // {
+        //     //     // atomicAdd(&transactions_processed, last_transaction + 1);
+        //     //     atomicAdd(&transactions_processed, 16384);
+        //     // }
+        //     // __syncthreads();
+
+        //     // cumulative sum
+        //     if (tid == 0)
+        //     {
+        //         // TODO: Use cub for this or implement a parallel prefix sum
+        //         indices[0] = 0;
+        //         for (int i = 1; i <= last_transaction; i++)
+        //         {
+        //             indices[i] += indices[i - 1];
+        //             // if greater than threads, break
+        //             if (indices[i] > threads)
+        //             {
+        //                 last_transaction = i - 1;
+        //                 break;
+        //             }
+        //         }
+
+        //         atomicAdd(&transactions_processed, last_transaction + 1);
+        //         // printf("Transactions Processed: %d\tLast Transaction: %d\tNumber of transactions: %d\n", transactions_processed, last_transaction, work_item.db->numTransactions);
+        //     }
+        //     __syncthreads();
+
+        //     // get which transaction and which item to load into buffer
+        //     int transaction_id = -1;
+        //     int item_id = -1;
+        //     for (int i = 0; i <= last_transaction; i++)
+        //     {
+        //         // if (tid >= start_end[i].start && tid < start_end[i].end)
+        //         if (tid >= indices[i] && tid < indices[i + 1])
+        //         {
+        //             transaction_id = i;
+        //             item_id = tid - indices[i];
+        //             break;
+        //         }
+        //     }
+
+        //     __syncthreads();
+
+        //     // load the items into buffer
+        //     if (transaction_id != -1 && item_id != -1)
+        //         buffer_items[tid] = work_item_db.d_transactions[transaction_id].data[item_id];
+        //     __syncthreads();
+
+        //     // // if the item is the primary item, process it
+        //     if (buffer_items[tid].key == work_item.primary && transaction_id != -1 && item_id != -1)
+        //     {
+        //         int new_util = buffer_items[tid].value + buffer_transactions[transaction_id].utility;
+        //         atomicAdd(&new_work_item.utility, new_util);
+
+        //         // calculate number of items after this item
+        //         int num_items_after = buffer_transactions[transaction_id].length - item_id - 1;
+
+        //         // create a new temporary transaction that points to the next item
+        //         atomicAdd(&num_items, num_items_after);
+        //         int new_tid = atomicAdd(&num_transactions, 1);
+        //         temp_transactions[new_tid].length = num_items_after;
+        //         temp_transactions[new_tid].utility = buffer_transactions[transaction_id].utility + buffer_items[tid].value;
+        //         temp_transactions[new_tid].data = buffer_transactions[transaction_id].data + item_id + 1;
+
+        //         // get TWU for this transaction
+        //         for (int i = 0; i < num_items_after; i++)
+        //         {
+        //             new_util += buffer_items[tid + i + 1].value;
+        //         }
+
+        //         // add local utility
+        //         for (int i = 0; i < num_items_after; i++)
+        //         {
+        //             add_bucket_util(lu_su, work_item.max_item * scale, buffer_items[tid + i + 1].key, new_util, LOCAL_UTIL);
+        //         }
+        //     }
+        //     __syncthreads();
+
+        //     last_transaction = -1;
+
+        // }
+
+        for (int i = tid; i < work_item_db.numTransactions; i += threads)
         {
-            Transaction &oldTrans = work_item.db->d_transactions[i];
-            // atomicMax(&local_ts.largest_trans, (int)oldTrans.length);
-            atomicMax((int *)&largest_trans_scan, (int)oldTrans.length);
-            int idx = oldTrans.findItem(work_item.primary);
-            if (idx == -1)
-                continue;
-
-            // Update new_work_item.utility atomically.
-            atomicAdd(&new_work_item.utility, oldTrans.utility + oldTrans.data[idx].util);
-
-            int suffix_count = oldTrans.length - (idx + 1);
-            if (suffix_count <= 0)
-                continue;
-
-            // Reserve space for suffix items.
-            atomicAdd(&num_items, suffix_count);
-            int t_idx = atomicAdd(&num_transactions, 1);
-
-            // Create a temporary transaction with the suffix.
-            Transaction &newTrans = temp_transaction[t_idx];
-            newTrans.data = oldTrans.data + idx + 1;
-            newTrans.length = suffix_count;
-            newTrans.utility = oldTrans.utility + oldTrans.data[idx].util;
-
-            // Compute the total local utility for the transaction.
-            int total_local_util = newTrans.utility;
-            for (int j = 0; j < suffix_count; j++)
+            Transaction t = work_item_db.d_transactions[i];
+            int idx = t.findItem(work_item.primary);
+            if (idx != -1)
             {
-                total_local_util += newTrans.data[j].util;
-            }
+                int new_util = t[idx].value + t.utility;
+                atomicAdd(&new_work_item.utility, new_util);
 
-            // Update the local utility buckets.
-            for (int j = 0; j < suffix_count; j++)
-            {
-                // add_bucket_util(local_util,
-                //                 work_item.max_item * scale,
-                //                 newTrans.data[j].key,
-                //                 total_local_util);
-                add_bucket_util(lu_su, work_item.max_item * scale, newTrans.data[j].key, total_local_util, LOCAL_UTIL);
+                // calculate number of items after this item
+                int num_items_after = t.length - idx - 1;
+                if (num_items_after == 0)
+                {
+                    continue;
+                }
+
+                // create a new temporary transaction that points to the next item
+                atomicAdd(&num_items, num_items_after);
+
+                int new_tid = atomicAdd(&num_transactions, 1);
+                temp_transactions[new_tid].length = num_items_after;
+                temp_transactions[new_tid].utility = t.utility + t[idx].value;
+                temp_transactions[new_tid].data = t.data + idx + 1;
+
+                // get TWU for this transaction
+                for (int j = 0; j < num_items_after; j++)
+                {
+                    new_util += t[idx + j + 1].value;
+                }
+
+                // add local utility
+                for (int j = 0; j < num_items_after; j++)
+                {
+                    add_bucket_util(lu_su, work_item.max_item * scale, t[idx + j + 1].key, new_util, LOCAL_UTIL);
+                }
             }
         }
-        // After processing all transactions in parallel:
+
         __syncthreads();
 
-        // --- Add this block ---
-        // All threads wait, then thread 0 checks if the pattern qualifies:
+        // (4) Save patterns with utility greater than min_util
         if (tid == 0)
         {
+<<<<<<< HEAD
             uint64_t curr_time = clock64();
             uint64_t diff = curr_time - local_ts.prev;
 
@@ -322,26 +472,24 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             // printf("Num new items: %d\n", num_items);
             // printf("Num new transactions: %d\n", num_transactions);
             if (new_work_item.utility >= min_util)
+=======
+            if (new_work_item.utility > min_util)
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
             {
                 add_pattern(&new_work_item, d_high_utility_patterns);
             }
         }
-        __syncthreads();
 
-        // // Now handle the case when there are no surviving transactions:
-        if (num_transactions == 0)
+        // if no new items, skip
+        if (num_items == 0)
         {
             if (tid == 0)
             {
+                global_free(lu_su);
+                global_free(temp_transactions);
                 curr_work_queue->finish_task();
 
-                // Free allocated memory here if necessary.
-                // global_free(local_util);
-                global_free(temp_transaction);
-
-                // Free the pattern.
-                global_free(new_work_item.pattern);
-
+                // Free the memory if all work is done using that db
                 int ret = atomicAdd(&work_item.work_done[0], 1);
                 if (ret == work_item.work_count - 1)
                 {
@@ -355,14 +503,16 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
                 local_ts.processed_count++;
 
             }
+
             __syncthreads();
             continue;
         }
 
-        // // (6) Allocate memory for the new database in new_work_item.
+        // (5) Allocate memory for new database
         if (tid == 0)
         {
-            // printf("Allocating memory\n");
+            printf("Utility: %d\n", new_work_item.utility);
+
             new_work_item.db = reinterpret_cast<Database *>(global_malloc(sizeof(Database)));
             new_work_item.db->d_data = reinterpret_cast<Item *>(global_malloc(num_items * sizeof(Item)));
             new_work_item.db->d_transactions = reinterpret_cast<Transaction *>(
@@ -370,6 +520,7 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
             new_work_item.db->numItems = 0;
             new_work_item.db->numTransactions = 0;
 
+<<<<<<< HEAD
             max_item = 0;
             primary_count = 0;
             hashes = reinterpret_cast<int *>(
@@ -400,34 +551,61 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
         for (int i = tid; i < num_transactions; i += blockDim.x)
         {
+=======
+            Item *hashes = reinterpret_cast<Item *>(global_malloc(num_transactions * scale * sizeof(Item)));
+            memset(hashes, -1, num_transactions * scale * sizeof(Item));
 
-            Transaction tempTrans = temp_transaction[i];
-            atomicMax((int *)&largest_trans_merge, (int)tempTrans.length);
-            int total_subtree_util = tempTrans.utility;
-            int count = 0;
-            // Count how many items survive filtering.
-            for (int j = 0; j < tempTrans.length; j++)
-            {
-                // int idx = find_item(local_util, work_item.max_item * scale, tempTrans.data[j].key);
-                int idx = find_item(lu_su, work_item.max_item * scale, tempTrans.data[j].key);
-                // if (local_util[idx].util >= min_util)
-                if (lu_su[idx].local_util >= min_util)
-                {
-                    count++;
-                    total_subtree_util += tempTrans.data[j].util;
-                }
-            }
-            if (count == 0)
-                continue;
+            last_transaction = -1;
+            transactions_processed = 0;
+        }
+        __syncthreads();
 
-            int new_trans_idx = atomicAdd(&new_work_item.db->numTransactions, 1);
-            Transaction &newTrans = new_work_item.db->d_transactions[new_trans_idx];
+        // // (5) Copy the transactions
+        // while (transactions_processed != num_transactions)
+        // {
+        //     __syncthreads();
+        //     // load into buffer
+        //     if (tid + transactions_processed < num_transactions)
+        //     {
+        //         buffer_transactions[tid] = temp_transactions[tid + transactions_processed];
+        //         atomicMax(&last_transaction, tid);
+        //     }
+        //     __syncthreads();
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
 
-            int start = atomicAdd(&new_work_item.db->numItems, count);
-            newTrans.data = new_work_item.db->d_data + start;
-            newTrans.length = count;
-            newTrans.utility = tempTrans.utility;
+        //     // load the item indices into buffer
+        //     if (tid <= last_transaction)
+        //     {
+        //         indices[tid + 1] = buffer_transactions[tid].length;
+        //     }
+        //     __syncthreads();
 
+        //     // cumulative sum
+        //     if (tid == 0)
+        //     {
+        //         indices[0] = 0;
+        //         // printf("%d ", indices[0]);
+        //         for (int i = 1; i <= last_transaction; i++)
+        //         {
+        //             // printf("%d ", indices[i]);
+        //             indices[i] += indices[i - 1];
+        //             // if greater than threads, break
+        //             if (indices[i] > threads)
+        //             {
+        //                 last_transaction = i - 1;
+        //                 break;
+        //             }
+        //         }
+        //         // printf("\n");
+
+        //         // // print the cumulative sum
+        //         // for (int i = 0; i <= last_transaction; i++)
+        //         // {
+        //         //     printf("%d:%d ", i,indices[i]);
+        //         // }
+        //         // printf("\n");
+
+<<<<<<< HEAD
             int trans_idx = 0;
             int temp_util = 0;
             for (int j = 0; j < tempTrans.length; j++)
@@ -516,19 +694,111 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
         // __syncthreads();
 
+=======
+        //         transactions_processed += last_transaction + 1;
+        //     }
+        //     __syncthreads();
 
-        // (10) Update max_item and primary_count in parallel.
-        for (int i = tid; i < work_item.max_item * scale; i += blockDim.x)
-        {
-            if (lu_su[i].local_util >= min_util)
-                atomicAdd(&max_item, 1);
-            if (lu_su[i].subtree_util >= min_util)
-                atomicAdd(&primary_count, 1);
-        }
-        __syncthreads();
+        //     // get which transaction and which item to load into buffer
+        //     int transaction_id = -1;
+        //     int item_id = -1;
+        //     for (int i = 0; i < last_transaction + 1; i++)
+        //     {
+        //         if (tid >= indices[i] && tid < indices[i + 1] && indices[i + 1] < threads)
+        //         {
+        //             transaction_id = i;
+        //             item_id = tid - indices[i];
+        //             break;
+        //         }
+        //     }
 
+
+        //     __syncthreads();
+        //     // printf("TID:%d\tTransaction ID: %d, Item ID: %d\n", tid,transaction_id, item_id);
+        //     __syncthreads();
+
+        //     // __syncthreads();
+        //     valid[tid + 1] = false;
+        //     // if(tid == 0)
+        //     // {
+        //     //     printf("Last Transaction: %d\n\n", last_transaction);
+        //     // }
+        //     // __syncthreads();
+
+        //     // load the items into buffer
+        //     if (transaction_id != -1 && item_id != -1)
+        //     {
+        //         buffer_items[tid] = temp_transactions[transaction_id].data[item_id];
+        //         atomicMax(&last_item, tid);
+        //         // if the item had a local utility greater than min_util, set valid to true
+        //         int idx = find_item(lu_su, work_item.max_item * scale, buffer_items[tid].key);
+        //         if (idx != -1 && lu_su[idx].local_util >= min_util)
+        //         {
+        //             valid[tid] = true;
+        //         }
+        //     }
+        //     __syncthreads();
+
+        //     // if (tid == 0)
+        //     // {
+        //     //     printf("Last Transaction: %d\n", last_transaction);
+        //     //     printf("Last Item: %d\n", last_item);
+        //     //     for (int i = 0; i < last_item; i++)
+        //     //     {
+        //     //         printf("%d:%d ", buffer_items[i].key, buffer_items[i].value);
+        //     //     }
+        //     //     printf("\n");
+
+        //     //     for (int i = 0; i < last_item; i++)
+        //     //     {
+        //     //         printf("%d ", valid[i]);
+        //     //     }
+        //     //     printf("\n");
+        //     // }
+        //     // __syncthreads();
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
+
+        //     // cumulative sum of the valid items
+        //     if (tid == 0)
+        //     {
+        //         valid[0] = 0;
+        //         for (int i = 1; i <= last_item; i++)
+        //         {
+        //             valid[i] += valid[i - 1];
+        //         }
+        //     }
+
+            
+
+        //     // // print the cumulative sum
+        //     // if (tid == 0)
+        //     // {
+        //     //     for (int i = 0; i < last_item; i++)
+        //     //     {
+        //     //         printf("%d ", valid[i]);
+        //     //     }
+        //     //     printf("\n");
+        //     // }
+
+        //     if (tid == 0)
+        //     {
+        //         last_transaction = -1;
+        //         last_item = -1;
+        //         // printf("\n\n");
+        //     }
+
+        //     __syncthreads();
+
+
+        // }
+        // __syncthreads();
+
+        // (6) Merge identical transactions
+
+        // (7) Create new work items
         if (tid == 0)
         {
+<<<<<<< HEAD
             num_transactions = 0;
         }
 
@@ -625,12 +895,16 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
 
             local_ts.processed_count++;
 
+=======
+            global_free(lu_su);
+            global_free(temp_transactions);
+            curr_work_queue->finish_task();
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
         }
 
         __syncthreads();
-
-        // (Optional) Free allocated memory here if necessary.
     }
+<<<<<<< HEAD
 
     if (tid == 0)
     {
@@ -644,3 +918,6 @@ __global__ void test(AtomicWorkStack *curr_work_queue,
         flame_graph[bid].buckets[local_ts.processed_count].idle += diff;
     }
 }
+=======
+}
+>>>>>>> a5cdaa4ab755b0bbda98cd8c8448c8e2b75581fd
